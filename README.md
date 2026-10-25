@@ -7,6 +7,27 @@
 
 ---
 
+## 仓库里有什么 / 没有什么
+
+**入库**：代码（`ik/ grasp/ render/ collect/ tools/`）、MJCF 模型与网格贴图（`model/`，约 20 MB）、文档（`docs/`）、参考实现（`old_ros/`）。
+**不入库**（见 `.gitignore`，全部可由代码重生成）：
+
+| 目录 | 内容 | 生成方式 |
+|---|---|---|
+| `videos/` `dataset/` | mp4、lerobot v3.0 数据集 | `collect/collect.py` → `collect/export_lerobot.py` |
+| `scripts/` | SDG 母本（1000 个 `npz`/`json` + 索引） | `scripts/run_1000.sh` 调用 `collect/` |
+| `inspect/` `logs/` | 排查图与运行回执 | `tools/inspect_episode.py`、`tools/run_pipeline.py` |
+
+环境前置（本机踩过的坑，不设会直接失败）：
+
+```bash
+# Python 解释器前面必须清掉被污染的 PYTHONHOME/PYTHONPATH，否则报 No module named 'encodings'
+env -u PYTHONHOME -u PYTHONPATH /usr/bin/python3 <脚本>
+# 渲染后端只认 egl（glfw/osmesa 都会崩）
+export MUJOCO_GL=egl
+# 依赖见 requirements.txt（mujoco / numpy / opencv）
+```
+
 ## 我要生成数据 → 只看这一份
 
 👉 **[`docs/RUNBOOK_SDG.md`](docs/RUNBOOK_SDG.md)**（操作手册：顺序、命令、每个参数什么时候用、1000 条怎么跑）

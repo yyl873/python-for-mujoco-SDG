@@ -1,0 +1,8 @@
+# 采集 / 仿真侧依赖（实测环境：Python 3.10.12）
+# 安装：env -u PYTHONHOME -u PYTHONPATH /usr/bin/python3 -m pip install -r requirements.txt
+mujoco==3.16.0
+numpy==1.21.5
+opencv-python==4.5.4
+
+# 注意：collect/export_lerobot.py 需要独立的 lerobot 环境（本机为
+# ~/miniforge3/envs/lerobot312），不要与上面三个包装在同一个解释器里。
