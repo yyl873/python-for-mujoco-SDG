@@ -1,0 +1,151 @@
+<mujoco model="so_arm101 scene">
+  <include file="so_arm101.xml" />
+  
+  <!-- 提高物理精度 -->
+  <option iterations="100" tolerance="1e-10" cone="elliptic" impratio="10" />
+  
+  <statistic center="0.1 -0.01 0.05" extent="0.5" />
+
+  <visual>
+    <headlight diffuse="0.42 0.42 0.42" ambient="0.19 0.19 0.19" specular="0 0 0" />
+    <rgba haze="0.15 0.25 0.35 1" />
+    <global azimuth="45" elevation="-20" />
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.4 0.5 0.6" rgb2="0 0 0" width="512" height="3072" />
+    
+    <texture type="2d" name="tex_lab_bg" file="lab_tex.png" />
+    <material name="mat_lab_bg" texture="tex_lab_bg" specular="0" shininess="0" />
+
+    <texture type="2d" name="tex_mousepad" file="mousepad_tex.png" />
+    <material name="mat_mousepad" texture="tex_mousepad" specular="0" shininess="0" />
+
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8" width="300" height="300" />
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2" />
+
+    <texture type="2d" name="tex_table" file="table_tex.png" />
+    <material name="mat_table" texture="tex_table" specular="0.1" shininess="0.1" />
+
+    <texture type="2d" name="tex_box" file="box_tex2.png" />
+    <material name="mat_box" texture="tex_box" specular="0.05" shininess="0.1" />
+
+    <texture type="2d" name="tex_obj_back" file="object_tex1.png" />
+    <material name="mat_obj_back" texture="tex_obj_back" specular="0.5" shininess="0.7" />
+
+    <texture type="2d" name="tex_obj_front" file="object_tex2.png" />
+    <material name="mat_obj_front" texture="tex_obj_front" specular="0.5" shininess="0.7" />
+
+    <texture type="2d" name="tex_obj_side" file="object_tex3.png" />
+    <material name="mat_obj_side" texture="tex_obj_side" specular="0.3" shininess="0.5" />
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 1.5" dir="0 0 -1" directional="true" diffuse="0.5 0.5 0.5" specular="0.1 0.1 0.1" />
+    
+    <!-- 地面：直接接地，不留缝隙 -->
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane" pos="0 0 -0.1" />
+    
+    <!-- 实验室背景墙 -->
+    <body name="lab_wall" pos="0.8 0 0.62">
+      <geom name="wall_geom" type="box" size="0.01 1.5 0.75" material="mat_lab_bg" contype="0" conaffinity="0" />
+    </body>
+
+    <!-- 桌子：中心下沉到 -0.02，使得桌面顶面恰好在 Z=0！与底座完美齐平 -->
+    <body name="table" pos="0.18 -0.005 -0.02">
+      <geom name="table_top" type="box" size="0.6 1.0 0.02" material="mat_table"/>
+    </body>
+
+    <!-- 圆形垫子：厚度 0.001，中心在 0.001，顶面在 0.002 -->
+    <body name="pick_zone" pos="0.31 0.090 0.001">
+      <!-- 实测: 直径 192mm, 厚度按 2mm -->
+      <geom name="pick_zone_geom" type="cylinder" size="0.096 0.001" rgba="0.3 0.5 0.4 1" friction="10.0 0.1 0.1"/>
+    </body>
+    
+    <!-- 鼠标垫：厚度 0.001，中心在 0.001，顶面在 0.002 -->
+    <body name="mousepad" pos="0.089 0.03 0.001" euler="0 0 -33">
+      <!-- 实测: 长 300mm 宽 245mm, 厚度忽略(按 2mm 便于碰撞) -->
+      <geom name="mousepad_geom" type="box" size="0.150 0.1225 0.001" material="mat_mousepad" />
+    </body>
+
+        <!-- 药盒-->
+    <!-- 药盒 实测: 盒子本身 长74 x 宽52 x 厚15 mm, 质量 11.5g
+         摆放方式: 竖立 —— 立在 74x15 的底面上, 所以仿真里是 74(x) x 15(y) x 52(z)
+         两个【窄端面】= 15 x 52 mm, 位于 x=±37mm, 两指沿 x 方向跨过 74mm 夹这两个面
+         惯量 Ixx=m(y²+z²)/12, Iyy=m(x²+z²)/12, Izz=m(x²+y²)/12 -->
+    <body name="object" pos="0.295 0.090 0.028" euler="0 0 0">
+      <freejoint name="obj_free"/>
+      <inertial pos="0 0 0" mass="0.0115" diaginertia="2.81e-06 7.84e-06 5.46e-06"/>
+      
+      <!-- 药盒碰撞体。质量仅 11.5 g，若用默认 solref="0.02 1"（接触刚度极高）
+           夹爪一碰就会产生 20 N 量级的冲量（≈重力 185 倍）导致弹飞。
+           solref="0.04 1" 让接触时间常数翻倍、刚度降为约 1/4；
+           solimp="0.9 0.95 0.001" 放宽穿透阻尼区间，小质量物体不再被弹开。
+           condim="4" 开启扭转摩擦维度，薄板类物体被夹持时不易绕接触点转动滑脱。 -->
+      <!-- 摩擦实测依据: TPU 指尖对纸盒, 滑动摩擦 0.8~1.2 (软胶偏上限)。
+           原先写 10.0 是为了"能抓起来"的假值, 实测 μ<1.0 就会在搬运中途滑脱。
+           solref/solimp 保留: 小质量物体(11.5g)需要软化接触才不弹飞 -->
+      <!-- ★ 2024-11 第六轮：碰撞位掩码（contype/conaffinity）——只让"指垫"碰药盒。
+           位定义：bit0(1)=通用件(臂/桌/垫/木盒/地面)；bit1(2)=药盒；bit2(4)=指垫；bit3(8)=指壳。
+           规则：(contype1 & conaffinity2) || (contype2 & conaffinity1)。
+           药盒 = (2, 5)：和通用件(1&5=1)、指垫(5 里的 4) 碰，和不带 bit0 的指壳(8) 不碰。
+           为什么必须这么做：指壳是 C 形件，MuJoCo 用它的**凸包**做碰撞，凸包把开口填满，
+           实测完全下探位姿下固定指与药盒距离 −22.6 mm —— 两指之间在碰撞里是实心，
+           下探必然戳在盒顶（92/400 步接触、峰值 2.73 N、把盒压进桌面 5.1 mm）。 -->
+      <geom name="object_physics" type="box" size="0.037 0.0075 0.026"
+            friction="1.2 0.01 0.0001" contype="2" conaffinity="5"
+            solref="0.04 1" solimp="0.9 0.95 0.001" condim="4" rgba="0 0 0 0"/>
+      
+            <!-- 正面和背面（垂直于 y，74x52 的两个大面） -->
+      <geom type="box" size="0.0364 0.0001 0.0259" pos="0 -0.0074 0" material="mat_obj_front" contype="0" conaffinity="0"/>
+      <geom type="box" size="0.0364 0.0001 0.0259" pos="0 0.0074 0" material="mat_obj_back" contype="0" conaffinity="0"/>
+
+      <!-- 左右两个窄端面（垂直于 x，15x52 —— 真机就是夹这两个面） -->
+      <geom type="box" size="0.0001 0.0074 0.0259" pos="-0.0364 0 0" material="mat_obj_side" contype="0" conaffinity="0"/>
+      <geom type="box" size="0.0001 0.0074 0.0259" pos="0.0364 0 0" material="mat_obj_side" contype="0" conaffinity="0"/>
+
+      <!-- 顶面和底面（垂直于 z，74x15） -->
+      <geom type="box" size="0.0364 0.0074 0.0001" pos="0 0 0.0259" material="mat_obj_side" contype="0" conaffinity="0"/>
+      <geom type="box" size="0.0364 0.0074 0.0001" pos="0 0 -0.0259" material="mat_obj_side" contype="0" conaffinity="0"/>
+    </body>
+
+    <!-- 物品2：目标盒子 (底板贴地，中心在 0.025)
+         位置：已按用户要求恢复到原始的 (0.290, -0.132)，不再为迁就夹持方向而挪动。
+         实测(2024-11 修正)：外 142(长) x 115(宽) x 50(高) mm，壁厚 4mm，底厚 4mm。
+         ⚠️ 长宽朝向：用户实测"摆在这里时 142 是 y 向、115 是 x 向"，
+            所以这里 x 半宽 57.5mm、y 半宽 71mm。旧模型把 x/y 写反了
+            （写成 x 半宽 71 / y 半宽 57.5），已按此修正。
+         内腔：x ±53.5mm、y ±67mm，底板顶面 z = 0.004。 -->
+    <body name="target_box" pos="0.290 -0.132 0.025">
+      <inertial pos="0 0 -0.01" mass="0.045" diaginertia="6e-05 8e-05 1.2e-04"/>
+      
+      <!-- 外 115(x) x 142(y) x 50(z)；x 向两侧壁在 ±(57.5-2)mm，y 向在 ±(71-2)mm -->
+      <geom name="box_bottom" type="box" size="0.0575 0.071 0.002" pos="0 0 -0.023" material="mat_box"/>
+      <geom name="box_left" type="box" size="0.002 0.071 0.025" pos="-0.0555 0 0" material="mat_box"/>
+      <geom name="box_right" type="box" size="0.002 0.071 0.025" pos="0.0555 0 0" material="mat_box"/>
+      <geom name="box_front" type="box" size="0.0535 0.002 0.025" pos="0 -0.069 0" material="mat_box"/>
+      <geom name="box_back" type="box" size="0.0535 0.002 0.025" pos="0 0.069 0" material="mat_box"/>
+    </body>
+    </worldbody>
+
+  <!-- 让 MuJoCo 一启动就是指定的姿态。
+       2024-11 曾经试过把预设姿态换成真机 golden pose
+       (pan -36° / lift +4° / elbow +14° / wrist_flex +55° / roll -104°)，结论：**回退**。
+       原因：golden pose 下手指初始就贴在药盒旁边（jaw 最近 34mm、gripper 49mm，且与药盒同高），
+       必须先把"关节空间第一步"换成"笛卡尔竖直抬出 + 抬升时夹爪保持闭合"才能不推倒药盒；
+       而即使这样，合爪时药盒仍会在"边缘接触"下翻倒（实测抬升 0~5mm、药盒 z 27.8->9.3），
+       与旧的塌陷姿态相比是"临界稳定"被打破。要真正支持 golden pose，得先修指垫几何
+       （给两指加平面贴面 geom），见 docs/HANDOFF.md §6.2-3。 -->
+  <keyframe>
+    <key name="home" 
+         qpos="
+         0.0 
+         -1.74535 
+         1.54036 
+         1.23277 
+         -1.80689 
+         0.0
+         0.295 0.090 0.028  1 0 0 0" 
+    />
+  </keyframe>
+</mujoco>

@@ -1,0 +1,27 @@
+# ===== 生成数据 / 产物：不入库 =====
+# 由 collect/collect.py 与 tools/run_pipeline.py 重生成，见 README
+/videos/
+/dataset/
+/logs/
+/inspect/
+/scripts/*
+!/scripts/DATA_CARD.md
+
+# ===== 本机缓存 / 临时残留 =====
+/.cache/
+/.mplcache/
+/.tmp-sessfix/
+/.tmp_*.txt
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.bak
+
+# ===== 兜底：任何漏网的大产物 =====
+*.npz
+*.mp4
+*.avi
+*.parquet
+*.pkl
+*.log
