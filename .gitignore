@@ -25,3 +25,5 @@ venv/
 *.parquet
 *.pkl
 *.log
+# timestamped backups
+*.bak.*

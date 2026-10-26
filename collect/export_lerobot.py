@@ -160,6 +160,10 @@ def main(argv=None) -> int:
                          "real-closed=真机 0 表示闭合。与真机数据混合训练时必须换成真机量纲")
     ap.add_argument("--jaw-open-deg", type=float, default=85.94,
                     help="仿真 jaw 全张开角（度，默认 85.94 = 采集上限 1.5 rad）")
+    ap.add_argument("--gripper-full", type=float, default=100.0,
+                    help="真机夹爪满量程值（仅 real-open / real-closed 有意义）。"
+                         "★别用默认 100：本机真机实测 fixed 批次 49.08、corners 批次 42.27。"
+                         "混训前必须传目标真机数据集的实测值，否则仿真夹爪尺度会和真机差约 2 倍")
     ap.add_argument("--units", choices=["deg", "rad"], default="deg",
                     help="state/action 单位（默认 deg，与 SO-101 真机数据集一致）")
     ap.add_argument("--episodes", default=None, help="只导这些编号，如 0,3,7（默认全部正样本）")
@@ -220,7 +224,7 @@ def main(argv=None) -> int:
         eid = int(r["episode_id"])
         try:
             state, action, phase = episode_arrays(
-                r, src, args.units, args.gripper_space, args.jaw_open_deg)
+                r, src, args.units, args.gripper_space, args.jaw_open_deg, args.gripper_full)
             env_p, wrist_p = video_rel(r, "env"), video_rel(r, "wrist")
             if not env_p or not wrist_p:
                 raise RuntimeError("没有 video_env/video_wrist（采集时用了 --no-render？）")
@@ -310,6 +314,12 @@ def main(argv=None) -> int:
         source_index_sha=None,
         n_episodes=done, n_frames=int(n_frames),
         units=args.units, joints=JOINTS, task=task,
+        gripper_space=args.gripper_space,
+        jaw_open_deg=float(args.jaw_open_deg),
+        gripper_full=float(args.gripper_full),
+        gripper_note=("sim=jaw 角（0=全闭）；real-open/real-closed 时按 "
+                      "gripper_full 线性映射越大越开。混训前必须与本机真机数据集实测满量程一致"
+                      "（fixed 49.08 / corners 42.27），否则夹爪列尺度会差约 2 倍。"),
         drop_phases=sorted(drop),
         episode_ids=[int(i["eid"]) for i in plan],
         note=("observation.state=qpos[:6], action=ctrl[:6]（关节角命令）；"
@@ -350,6 +360,22 @@ def main(argv=None) -> int:
                   f"img={'ok' if img_ok else 'BAD'} "
                   f"stats={'ok' if st and st.get('action') else 'MISSING'}")
             print(f"            样本键: {keys}")
+            # ---- 夹爪列自检：混训前唯一必须亲眼看的数字 ----
+            try:
+                gs = (st or {}).get("observation.state") or {}
+                if "min" in gs and "max" in gs:
+                    g_lo, g_hi = float(gs["min"][5]), float(gs["max"][5])
+                    print(f"            夹爪列 min {g_lo:6.2f} / max {g_hi:6.2f}   "
+                          f"(space={args.gripper_space} full={args.gripper_full:.2f} "
+                          f"jaw_open={args.jaw_open_deg:.2f})")
+                    if args.gripper_space != "sim":
+                        if g_hi > 60.0:
+                            print("  ⚠️  夹爪 max > 60：--gripper-full 很可能还是默认值 100，"
+                                  "而真机实测是 fixed 49.08 / corners 42.27 → 混训前必须改")
+                        elif g_hi < 30.0:
+                            print("  ⚠️  夹爪 max < 30：满量程设小了，请核对该真机数据集的实测张开值")
+            except Exception:                        # noqa: BLE001
+                pass
             ok = (len(back) == n_frames and back.meta.total_episodes == done
                   and img_ok and st and st.get("action"))
             if not ok:

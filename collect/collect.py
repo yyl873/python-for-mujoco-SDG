@@ -127,9 +127,14 @@ SPLITS_DIR = SCRIPTS_DIR / "splits"            # ★ split.py 产出的 train/va
 #             （avi / 预览 png / 拼图全部移出采集路径，改由 tools/inspect_episode.py 按需生成）。
 #             paths 键 env_avi/wrist_avi → video_env/video_wrist（读侧保留旧键回退）。
 #             物理与轨迹同 v5 逐位相同（只换容器与文件名），但训练侧读法不同，仍单独一代。
-DATASET_VERSION = "sdg-v7"   # 物理同 v6；env_camera 名义位姿复刻真机 _fixed 批次视角
-#                              （pos 0.65 0 0.55 -> 0.5814 -0.0418 0.5919，见 docs/REAL_DATASET_CAMERA_AUDIT.md §10）
-SCHEMA_VERSION = 2                             # npz/meta 结构版本，check_dataset 按它判代
+DATASET_VERSION = "sdg-v8"   # 采样范式换代：抓取姿态"反向生成"（见 §反向生成）
+#   v7 -> v8：不再是"手不动、把场景绕 pan 轴转 θ"（关节空间里只有 pan 变），
+#             而是"先采一条手臂姿态分支，再反推药盒该放哪、朝哪"。
+#             实测：盒朝向可连续覆盖 94.4°，40 条物理 38 通过（窗口内部 29/29），
+#             关节散布 lift 62° / elbow 129° / flex 150° / roll 100°（真机同量：112/102/60/99）。
+#             物理模型、指垫、相机、光照、后处理全部不变，变的是【采样方式】。
+SCHEMA_VERSION = 3                             # npz/meta 结构版本，check_dataset 按它判代
+#                                               （v3：randomization 里多 posture 块）
 TASK_ID = "pick_place_v1"                      # 任务标识（给下游按任务筛数据）
 DEFAULT_INSTRUCTION = ("Pick up the medicine box and place it into the wooden box.")
 # 起止姿态：oldros = old_ros initial_pose（默认）；golden = 上一轮遥操第 0 帧（A/B 用）；
@@ -162,6 +167,37 @@ DR_LO, DR_HI = 0.0, 6.0 # 径向抖动（沿 pan 轴 -> 药盒方向，实测正
 PAD_MARGIN = 0.002      # footprint 距垫边至少留 2mm，避免"半只脚在垫外"
 YAW_EXTRA_DEG = 1.5     # 药盒自身额外偏航（±，叠在场景旋转之上）
 N_JITTER_CANDS = 4      # 扰动候选个数；之后一定还有一个纯同构解兜底
+
+# ============================================================================
+# 反向生成（sdg-v8 起的主路径）—— 为什么换采样范式
+# ============================================================================
+# 问题：v7 的随机化是"整台机器人绕 pan 轴刚性转 θ"。它在关节空间里只投影到 pan 一个
+#   自由度，所以抓取姿态是【一个刚体】：实测 6 条 sdg-v7 的抓取末帧，lift/elbow/flex/roll
+#   的跨条散布只有 1.67° / 1.57° / 0.64° / 0.03°。
+#   而真机 354 条 episode 在"夹爪闭合那一帧"的散布是 112.24 / 101.60 / 59.61 / 98.85°。
+#   → 数据多样性缺口 ~65~3000 倍，而且缺口全在"手怎么摆"上，不在盒子怎么放上。
+#
+# 为什么不能"先定盒朝向、再解 IK"（两条都试过，都不行）：
+#   1) 绕盒心竖轴转三个路点后跑位置 IK：位置收敛到 0.1mm，但手一动不动（Δpsi ≈ −ψ）——
+#      位置 IK 只有 3 个约束，姿态由 seed 决定，目标点转了手不跟着转。
+#   2) 给"合爪轴偏航/水平/贴面"加约束再解：5 自由度上 3 位置 + 3 姿态 = 过约束，
+#      数值上不收敛（跑到限位上）。
+#
+# 所以改成反过来生成：药盒本来就允许摆在垫上任意位置、任意朝向（真人就是这么放的），
+#   约束只存在于手那一侧 —— 手的姿态决定了"盒必须摆成什么样才塞得进两片指垫之间"。
+#   流程：随机 seed → 位置 IK 到垫心附近 → 用【指垫实测几何】反推盒心与盒朝向 →
+#         过筛（贴面/朝下/在垫上）→ 真跑物理验收。
+#   实测命中率约 8~12%（2500 seed → 215 个可行姿态），物理通过率 95%（窗口内部 100%）。
+#
+# ★ 这套机制下 theta（场景旋转）不再使用：spawn.theta_deg 恒为 0，姿态多样性由分支本身给。
+POSTURE_SEED_LO = np.array([-70.0, -95.0, -90.0, -85.0, -170.0])   # deg，ARM_JOINTS 顺序
+POSTURE_SEED_HI = np.array([40.0, 60.0, 85.0, 85.0, 30.0])
+POSTURE_TRIES = 900          # 单次采样最多试多少个 seed（命中率 ~10%，够 99% 命中）
+POSTURE_ROUNDS = 3           # 一次采样失败后整轮重试几次
+POSTURE_NZ_MAX = 0.10        # 指垫法向竖直分量上限（名义抓取基线 0.045）
+POSTURE_TOOLZ_MAX = -0.30    # 工具轴必须朝下（从上方下来）
+POSTURE_TARGET_R_MM = 42.0   # IK 目标点在垫心周围的采样半径
+POSTURE_GRIP_Q = 0.42        # 量指垫朝向时的夹爪关节 qpos（= 夹着 15mm 盒时的实测值，rad）
 
 # ---- 为什么这么随机化（实测依据，别再改回去）-----------------------------------
 # 直接挪药盒位置(径向)或让它转角度，抓取会大面积失败：
@@ -354,48 +390,140 @@ BOX_DROP_Z = (0.008, 0.045)
 # ============================================================
 
 
-def sample_episode(rng, idx, pad, theta_max_deg):
+def _posture_probe(arm, q5):
+    """
+    给定 5 个手臂关节，实测"这个姿态能不能当抓取姿态"，并反推药盒该放哪、朝哪。
+
+    全部量从【指垫几何实体】读，不靠任何公式假设：
+      合爪轴 c   = 两片指垫中心连线（指垫沿它合拢）
+      指垫法向 n = 薄盒几何的局部 y 轴（1mm 薄的那条轴，就是贴住盒大面的方向）
+      盒心 mid   = 两片指垫中心的中点（药盒该在这儿）
+      盒朝向     = 合爪轴偏航 + 90°（合爪轴垂直盒长边 → 长边朝向 = 轴朝向 −90°，mod 180 等价）
+    """
+    a = arm
+    a.d.qpos[a.adr] = np.asarray(q5, float)
+    a.d.qpos[a.gadr] = POSTURE_GRIP_Q
+    mujoco.mj_kinematics(a.m, a.d)
+    mujoco.mj_comPos(a.m, a.d)
+    gid = mujoco.mj_name2id(a.m, mujoco.mjtObj.mjOBJ_GEOM, "pad_gripper_link")
+    jid = mujoco.mj_name2id(a.m, mujoco.mjtObj.mjOBJ_GEOM, "pad_jaw_link")
+    pg = np.asarray(a.d.geom_xpos[gid], float).copy()
+    pj = np.asarray(a.d.geom_xpos[jid], float).copy()
+    c = pj - pg
+    gap = float(np.linalg.norm(c) * 1000.0)
+    c = c / max(np.linalg.norm(c), 1e-12)
+    ng = np.abs(np.asarray(a.d.geom_xmat[gid], float).reshape(3, 3)[:, 1][2])
+    nj = np.abs(np.asarray(a.d.geom_xmat[jid], float).reshape(3, 3)[:, 1][2])
+    tool = -np.asarray(a.d.xmat[a.grip], float).reshape(3, 3)[:, 2]
+    return dict(c=c, gap_mm=gap, nz=float(0.5 * (ng + nj)),
+                mid=0.5 * (pg + pj),
+                tool=tool, tcp=np.asarray(a.d.site_xpos[a.tcp], float).copy())
+
+
+def sample_grasp_posture(rng, arm, pad, tries=POSTURE_TRIES):
+    """
+    采一条抓取姿态分支，并反推药盒位姿。返回 None 表示这一轮没采到（调用方重试）。
+
+    过筛四条（全部是"这批数据必须成立"的硬条件，不是调参）：
+      1) 位置 IK 收敛 ≤ TOL_IK_MM（否则这条姿态到不了垫子上）
+      2) 指垫法向竖直分量 nz ≤ POSTURE_NZ_MAX —— 指垫还得基本贴住盒子的竖直大面
+      3) 工具轴朝下（从上方下探，和 demo 同一套接近方式）
+      4) 反推出来的盒心 + 盒 footprint 整个还在绿垫上（沿用 PadZone 判据，余量 2mm）
+    """
+    for _ in range(int(tries)):
+        ang = float(rng.uniform(0.0, 2.0 * np.pi))
+        rad = (POSTURE_TARGET_R_MM / 1000.0) * float(np.sqrt(rng.uniform(0.0, 1.0)))
+        tgt = [pad.center[0] + rad * np.cos(ang), pad.center[1] + rad * np.sin(ang), 0.012]
+        seed = np.radians(rng.uniform(POSTURE_SEED_LO, POSTURE_SEED_HI))
+        q, err = arm.ik(tgt, seed)
+        if not np.isfinite(err) or err * 1000.0 > TOL_IK_MM:
+            continue
+        ev = _posture_probe(arm, q)
+        if ev["nz"] > POSTURE_NZ_MAX:
+            continue
+        if ev["tool"][2] > POSTURE_TOOLZ_MAX:
+            continue
+        if not (0.004 < ev["mid"][2] < 0.050):        # 盒心高度得在"垫上立着"那一档
+            continue
+        mid = ev["mid"][:2]
+        if float(np.linalg.norm(mid - pad.center)) * 1000.0 > pad.limit_mm() - pad.footprint_r * 1000.0:
+            continue
+        yaw_deg = float(np.degrees(np.arctan2(ev["c"][1], ev["c"][0])) + 90.0) % 180.0
+        if not pad.on_pad(mid, np.radians(yaw_deg)):
+            continue
+        return dict(q=[float(v) for v in np.asarray(q, float)],
+                    tcp=[float(v) for v in ev["tcp"]],
+                    box_xy=[float(mid[0]), float(mid[1])],
+                    box_yaw_deg=yaw_deg, nz=float(ev["nz"]), gap_mm=float(ev["gap_mm"]))
+    return None
+
+
+def sample_episode(rng, idx, pad, theta_max_deg, arm=None, nom=None):
     """
     采样一条 episode 的随机量（纯 dict，可直接 JSON 序列化）。
 
     ★几何硬约束：药盒必须整个英尺（footprint）留在绿垫上（用户明确要求）。
-      做法是"绕 pan 轴转 theta + 径向 dr"，但 theta 的上限由 PadZone 反算（实测约 10°），
-      不是随手给的 —— 因为只有"绕 pan 轴的同构旋转"才能保住工具姿态，
-      而只要旋转，盒心就沿半径 271.6mm 的圆弧走，转多了必然离开垫子。
-      采样完还会立刻用 footprint 判据夹一次，保证落点算出来就是合法的。
+    ★sdg-v8 起：出生位姿不再独立采样，而是由【抓取姿态分支】反推（见 §反向生成）。
+      传 arm 就走反向生成；不传（老工具/无模型场景）退化成 v7 的"绕 pan 轴转 θ"。
+      无论哪条路，结果都当场用 PadZone 的 footprint 判据夹一次，保证采样本身合法。
     """
-    # 半径/角度都在垫内取；theta 用 PadZone 反算的上限（并受 THETA_MAX_DEG 约束）
-    tmax = float(min(theta_max_deg, THETA_MAX_DEG))
-    theta = float(rng.uniform(-tmax, tmax))
-    dr = float(rng.uniform(DR_LO, DR_HI))
-    yaw_extra = float(rng.uniform(-YAW_EXTRA_DEG, YAW_EXTRA_DEG))
+    post = None
+    if arm is not None:
+        for _ in range(POSTURE_ROUNDS):
+            post = sample_grasp_posture(rng, arm, pad)
+            if post is not None:
+                break
 
-    C = _PAN_CENTER()
-    radial = OBJECT_NOMINAL - C
-    radial = radial / np.linalg.norm(radial)
+    if post is not None:
+        # ---- 反向生成：盒子放在"指垫中点"处，朝向 = 合爪轴 + 90° ----
+        spawn = dict(x=round(post["box_xy"][0], 5), y=round(post["box_xy"][1], 5), z=Z_SPAWN,
+                     yaw_deg=round(post["box_yaw_deg"], 2), theta_deg=0.0,
+                     dr_mm=0.0, yaw_extra_deg=0.0)
+        posture = dict(kind="reverse", q_deg=[round(float(np.degrees(v)), 3) for v in post["q"]],
+                       box_yaw_deg=round(float(post["box_yaw_deg"]), 2),
+                       tcp=[round(v, 5) for v in post["tcp"]],
+                       pad_nz=round(float(post["nz"]), 4),
+                       pad_gap_mm=round(float(post["gap_mm"]), 2))
+        internal = dict(_posture=post)
+    else:
+        # ---- 退化路径（v7 同构旋转）：只在没有 arm 可用时走 ----
+        tmax = float(min(theta_max_deg, THETA_MAX_DEG))
+        theta = float(rng.uniform(-tmax, tmax))
+        dr = float(rng.uniform(DR_LO, DR_HI))
+        yaw_extra = float(rng.uniform(-YAW_EXTRA_DEG, YAW_EXTRA_DEG))
 
-    def place(theta_deg, dr_mm):
-        th = np.radians(theta_deg)
-        Rz = np.array([[np.cos(th), -np.sin(th)], [np.sin(th), np.cos(th)]])
-        return C + Rz @ (OBJECT_NOMINAL - C) + radial * (dr_mm / 1000.0)
+        C = _PAN_CENTER()
+        radial = OBJECT_NOMINAL - C
+        radial = radial / np.linalg.norm(radial)
 
-    # 夹紧：越界就按比例回缩（先缩 dr，再缩 theta），保证采样结果本身就合规
-    xy = place(theta, dr)
-    yaw = np.radians(theta + yaw_extra)
-    for _ in range(60):
-        if pad.on_pad(xy, yaw):
-            break
-        dr *= 0.75
-        theta *= 0.85
+        def place(theta_deg, dr_mm):
+            th = np.radians(theta_deg)
+            Rz = np.array([[np.cos(th), -np.sin(th)], [np.sin(th), np.cos(th)]])
+            return C + Rz @ (OBJECT_NOMINAL - C) + radial * (dr_mm / 1000.0)
+
+        # 夹紧：越界就按比例回缩（先缩 dr，再缩 theta），保证采样结果本身就合规
         xy = place(theta, dr)
         yaw = np.radians(theta + yaw_extra)
+        for _ in range(60):
+            if pad.on_pad(xy, yaw):
+                break
+            dr *= 0.75
+            theta *= 0.85
+            xy = place(theta, dr)
+            yaw = np.radians(theta + yaw_extra)
+
+        spawn = dict(x=round(float(xy[0]), 5), y=round(float(xy[1]), 5), z=Z_SPAWN,
+                     yaw_deg=round(theta + yaw_extra, 2), theta_deg=round(theta, 2),
+                     dr_mm=round(dr, 2), yaw_extra_deg=round(yaw_extra, 2))
+        posture = dict(kind="congruent", q_deg=None, box_yaw_deg=spawn["yaw_deg"],
+                       tcp=None, pad_nz=None, pad_gap_mm=None)
+        internal = dict()
 
     return dict(
         episode_id=int(idx),
         seed=int(rng.integers(0, 2 ** 31 - 1)),
-        spawn=dict(x=round(float(xy[0]), 5), y=round(float(xy[1]), 5), z=Z_SPAWN,
-                   yaw_deg=round(theta + yaw_extra, 2), theta_deg=round(theta, 2),
-                   dr_mm=round(dr, 2), yaw_extra_deg=round(yaw_extra, 2)),
+        spawn=spawn,
+        posture=posture,
         jitter=dict(roll_delta_deg=round(float(rng.uniform(-ROLL_JITTER_DEG, ROLL_JITTER_DEG)), 2),
                     gz_delta_mm=round(float(rng.uniform(-GZ_JITTER_MM, GZ_JITTER_MM)), 2)),
         timing_scale=round(float(rng.uniform(0.90, 1.10)), 3),
@@ -421,6 +549,7 @@ def sample_episode(rng, idx, pad, theta_max_deg):
         material=dict(gain=round(float(rng.uniform(0.90, 1.10)), 3)),
         grasp=None,          # 由 search_grasp() 真跑物理后回填
         pad=None,            # 由 ensure_on_pad() 回填（落定后实测的 footprint 半径）
+        **internal,
     )
 
 
@@ -519,9 +648,10 @@ def ensure_on_pad(arm, cfg, pad, rng, theta_max_deg, max_tries=12):
                           retries=int(attempt - 1))
         if on_pad and upright:
             return True, cfg
-        # 不满足：重抽出生位姿（theta/dr/yaw 一起重来）
-        fresh = sample_episode(rng, cfg["episode_id"], pad, theta_max_deg)
-        cfg.update({k: fresh[k] for k in ("spawn", "jitter", "pad")})
+        # 不满足：重抽出生位姿（反向生成下 = 换一条抓取姿态分支）
+        fresh = sample_episode(rng, cfg["episode_id"], pad, theta_max_deg, arm=arm)
+        cfg.update({k: fresh[k] for k in ("spawn", "posture", "jitter", "_posture")
+                    if k in fresh})
         cfg.pop("pad", None)
         cfg["pad_retry"] = attempt
     return False, cfg
@@ -530,20 +660,30 @@ def ensure_on_pad(arm, cfg, pad, rng, theta_max_deg, max_tries=12):
 def waypoints_for(arm, nom, cfg, roll_delta_deg=0.0, gz_delta_mm=0.0):
     """
     给定随机化 cfg，算出三个接近路点：
-      1) 先拿"同构解"（场景旋转后的标定解，pan 平移 θ）
-      2) 用真实落定的 p0 做高度补偿：药盒落在桌面还是垫子上，抓取高度差多少就补多少
-      3) 叠上扰动（roll ±4°、gz ±1.5mm），再用位置 IK 重解抓取路点
 
-    这一步是整批数据能"既随机又不失败"的关键：同构解保证姿态对，
-    高度补偿保证指垫对准，扰动只改接触细节。
+    ★sdg-v8 主路径（反向生成）：抓取路点直接来自 cfg["_posture"]（采样到的姿态分支），
+      q_abv / q_ret 由它在同一个 TCP 竖线上向上解出来。高度补偿仍然做：药盒落在垫子上
+      还是桌面上差 2mm，指垫就会错过窄端面。roll/gz 不再抖（roll 是"指垫对齐轴"，
+      抖它等于把指垫转歪；见 ROLL_JITTER_DEG 注释）。
+
+    ★退化路径（无 arm 模型的历史口径）：同构解（场景旋转后的标定解，pan 平移 θ）+ 高度补偿。
     """
     p0 = settled_p0(arm, cfg)
+    dz = (p0[2] - NOMINAL_P0_Z) + gz_delta_mm / 1000.0
+
+    post = cfg.get("_posture")
+    if post is not None:
+        tcp = np.asarray(post["tcp"], float)
+        q_gsp, _ = arm.ik([tcp[0], tcp[1], 0.012 + dz], np.asarray(post["q"], float))
+        q_abv, _ = arm.ik([tcp[0], tcp[1], R.APPROACH_Z], q_gsp)
+        q_ret, _ = arm.ik([tcp[0], tcp[1], R.RETRACT_Z], q_abv)
+        return dict(q_ret=q_ret, q_abv=q_abv, q_gsp=q_gsp)
+
     theta = cfg["spawn"]["theta_deg"]
     wp = congruent_waypoints(nom, theta)
 
     q_abv = np.asarray(wp["q_abv"], float).copy()
     q_abv[4] = float(np.clip(q_abv[4] + np.radians(roll_delta_deg), arm.lo[4], arm.hi[4]))
-    dz = (p0[2] - NOMINAL_P0_Z) + gz_delta_mm / 1000.0
     # ★ 第七轮：横向补偿（GRASP_XY_OFFSET）要跟着场景旋转一起转，否则每条 episode
     #   指垫都偏 ~17 mm —— 实测漏了这一步时 20/20 全部 no_lift。
     off = np.asarray(getattr(R, "GRASP_XY_OFFSET", (0.0, 0.0)), float)
@@ -570,15 +710,23 @@ def search_grasp(arm, cfg, nom, attempts=None):
     #   指垫方案下 roll 是"指垫对齐轴"，±2° 就开始在【下探段】蹭盒（见 ROLL_JITTER_DEG 注释），
     #   所以这些 roll 扰动候选不是"备用成功路径"，而是"必然违反 G1 的路径"，白白耗时。
     #   实测：过滤前 seed 3 的第 1/3 条要试 5/7 次；过滤后一次命中。
-    cands = [("jitter", cfg["jitter"]["roll_delta_deg"], cfg["jitter"]["gz_delta_mm"]),
-             ("jitter", -cfg["jitter"]["roll_delta_deg"], -cfg["jitter"]["gz_delta_mm"])]
-    for dr_roll, dz in ((2.0, 1.0), (-2.0, -1.0), (4.0, 1.5), (-4.0, -1.5),
-                        (6.0, 0.0), (-6.0, 0.0), (8.0, 2.0), (-8.0, -2.0),
-                        (8.0, -2.0), (-8.0, 2.0)):
-        if abs(dr_roll) > abs(ROLL_JITTER_DEG) + 1e-9:
-            continue                     # roll 抖动上限之外的候选：跳过（见上）
-        cands.append(("jitter", dr_roll, dz))
-    cands.append(("congruent", 0.0, 0.0))
+    # ★sdg-v8 反向生成：姿态已经由采样定死，候选只改【抓取高度】。
+    #   roll 一律不抖（它是指垫对齐轴），供三个候选：本条 gz 抖动、反向 gz、纯姿态兜底。
+    #   实测（40 条覆盖 94.4° 窗口）：纯姿态 38/40 通过，窗口内部 29/29；
+    #   所以这里通常第 1 个候选就命中，失败的多半是姿态本身在窗口边界上。
+    if cfg.get("_posture") is not None:
+        gz = float(cfg["jitter"]["gz_delta_mm"])
+        cands = [("posture", 0.0, gz), ("posture", 0.0, -gz), ("posture", 0.0, 0.0)]
+    else:
+        cands = [("jitter", cfg["jitter"]["roll_delta_deg"], cfg["jitter"]["gz_delta_mm"]),
+                 ("jitter", -cfg["jitter"]["roll_delta_deg"], -cfg["jitter"]["gz_delta_mm"])]
+        for dr_roll, dz in ((2.0, 1.0), (-2.0, -1.0), (4.0, 1.5), (-4.0, -1.5),
+                            (6.0, 0.0), (-6.0, 0.0), (8.0, 2.0), (-8.0, -2.0),
+                            (8.0, -2.0), (-8.0, 2.0)):
+            if abs(dr_roll) > abs(ROLL_JITTER_DEG) + 1e-9:
+                continue                     # roll 抖动上限之外的候选：跳过（见上）
+            cands.append(("jitter", dr_roll, dz))
+        cands.append(("congruent", 0.0, 0.0))
 
     n = 0
     wp = None
@@ -591,7 +739,7 @@ def search_grasp(arm, cfg, nom, attempts=None):
         if ok:
             return rec, info, plan, dict(kind=kind, roll_deg=round(roll, 2),
                                          gz=round(R.DEF_GZ + (cfg["_p0"][2] - NOMINAL_P0_Z)
-                                                  + (dz / 1000.0 if kind == "jitter" else 0.0), 5),
+                                                  + (dz / 1000.0 if kind != "congruent" else 0.0), 5),
                                          attempt=n), n
         if attempts is not None and n >= attempts:
             break
@@ -1132,6 +1280,11 @@ def _keys_block(cfg, metrics, success, has_video, width, height):
                                         "color_jitter", "flicker_tau_s")},
         grasp_kind=gp.get("kind"), grasp_attempts=metrics.get("grasp_attempts"),
         grasp_roll_deg=gp.get("roll_deg"), grasp_gz=gp.get("gz"),
+        # sdg-v8：反向生成的反推量（盒朝向就是"这个姿态能夹的朝向"，不是另外采的）
+        posture_kind=(cfg.get("posture") or {}).get("kind"),
+        box_yaw_deg=(cfg.get("posture") or {}).get("box_yaw_deg"),
+        pad_nz=(cfg.get("posture") or {}).get("pad_nz"),
+        grasp_q_deg=(cfg.get("posture") or {}).get("q_deg"),
         pad_footprint_mm=pad.get("footprint_max_mm"), pad_on=pad.get("on_pad"),
         pad_yaw_settled_deg=pad.get("yaw_settled_deg"),
         rise_mm=metrics.get("rise_mm"), hdisp_mm=metrics.get("hdisp_mm"),
@@ -1224,8 +1377,17 @@ def policy_block(pad, theta_cap):
         mjcf_sha256={"scene.xml": _sha16(ROOT / "model" / "scene.xml"),
                      "so_arm101.xml": _sha16(ROOT / "model" / "so_arm101.xml")},
         randomization_policy=dict(
+            sampling="reverse_generation",          # sdg-v8：先采抓取姿态，再反推药盒位姿
             scene_rotation_deg=[-round(min(theta_cap, THETA_MAX_DEG), 1),
                                 round(min(theta_cap, THETA_MAX_DEG), 1)],
+            posture=dict(seed_ranges_deg=dict(lo=[float(v) for v in POSTURE_SEED_LO],
+                                              hi=[float(v) for v in POSTURE_SEED_HI]),
+                         target_radius_mm=POSTURE_TARGET_R_MM,
+                         pad_normal_z_max=POSTURE_NZ_MAX,
+                         tool_axis_z_max=POSTURE_TOOLZ_MAX,
+                         tries_per_sample=POSTURE_TRIES, rounds=POSTURE_ROUNDS,
+                         measured="2500 seed -> 215 可行姿态；盒朝向覆盖 94.4° 连续窗口；"
+                                  "40 条物理 38 通过（窗口内部 29/29）"),
             pad_constraint=dict(center=[float(v) for v in pad.center],
                                 radius_mm=round(pad.radius * 1000, 1),
                                 footprint_limit_mm=round(pad.limit_mm(), 1),
@@ -1669,11 +1831,10 @@ def main(argv=None):
     print(f"  渲染      : {'关（只刷物理）' if args.no_render else f'{width}x{height} @ {R.FPS:.0f}fps'}"
           f"   负样本: {'落轨迹' if args.keep_failed else '不落'}"
           f"{'（含视频）' if args.render_failed else '（不渲染）'}")
-    print(f"  随机范围  : 场景旋转 ±{min(theta_cap, THETA_MAX_DEG):.0f}°（垫内）/ 径向 "
-          f"{DR_LO:.0f}~{DR_HI:.0f}mm / 偏航 ±{YAW_EXTRA_DEG:.1f}° / "
-          f"节奏 ×0.90~1.10 / 相机 ±3cm / 噪声 2~4DN")
-    print(f"  抓取搜索  : 扰动候选 ≤{N_JITTER_CANDS} 次（roll±{ROLL_JITTER_DEG:.0f}° / "
-          f"gz±{GZ_JITTER_MM:.1f}mm）+ 纯同构解兜底，逐条真跑物理取第一个成功")
+    print(f"  随机范围  : 抓取姿态【反向生成】（盒朝向由姿态反推，实测可覆盖 94.4°）/ "
+          f"gz ±{GZ_JITTER_MM:.1f}mm / 节奏 ×0.90~1.10 / 相机 ±3cm / 噪声 2~4DN")
+    print(f"  抓取搜索  : 纯姿态候选 ≤3 次（roll 不抖 / gz ±{GZ_JITTER_MM:.1f}mm），"
+          f"逐条真跑物理取第一个成功")
     print()
 
     for k in range(args.n):
@@ -1683,8 +1844,11 @@ def main(argv=None):
         # ★每条一个独立 rng（只由 base_seed 与 eid 决定）：
         #   这样 --n 25 与 --n 20 后再 --start 20 --n 5 抽到的随机量逐位相同。
         rng_ep = np.random.default_rng([int(base_seed), int(eid)])
-        cfg = sample_episode(rng_ep, eid, pad, theta_cap)
+        cfg = sample_episode(rng_ep, eid, pad, theta_cap, arm=arm, nom=nom)
         t_ep = time.time()
+        if cfg.get("_posture") is None:
+            print(f"  [{k+1:>3}/{args.n}] ⚠️ ep_{eid:06d} 反向生成没采到可行姿态，"
+                  f"本轮退化为同构旋转（这条数据口径与 sdg-v8 不同，建议丢弃）")
 
         # ---- 绿垫硬约束：真落定一次，确认整个 footprint 在垫上，不行就换位姿 ----
         pad_ok, cfg = ensure_on_pad(arm, cfg, pad, rng_ep, theta_cap)
