@@ -127,7 +127,8 @@ SPLITS_DIR = SCRIPTS_DIR / "splits"            # ★ split.py 产出的 train/va
 #             （avi / 预览 png / 拼图全部移出采集路径，改由 tools/inspect_episode.py 按需生成）。
 #             paths 键 env_avi/wrist_avi → video_env/video_wrist（读侧保留旧键回退）。
 #             物理与轨迹同 v5 逐位相同（只换容器与文件名），但训练侧读法不同，仍单独一代。
-DATASET_VERSION = "sdg-v6"   # 物理同 v5（指垫贴指面 + dy=+17.5mm + 合爪 0.28），视频改 mp4
+DATASET_VERSION = "sdg-v7"   # 物理同 v6；env_camera 名义位姿复刻真机 _fixed 批次视角
+#                              （pos 0.65 0 0.55 -> 0.5814 -0.0418 0.5919，见 docs/REAL_DATASET_CAMERA_AUDIT.md §10）
 SCHEMA_VERSION = 2                             # npz/meta 结构版本，check_dataset 按它判代
 TASK_ID = "pick_place_v1"                      # 任务标识（给下游按任务筛数据）
 DEFAULT_INSTRUCTION = ("Pick up the medicine box and place it into the wooden box.")
@@ -701,11 +702,16 @@ def apply_camera_jitter(model, cfg):
     返回 (原值, 新值) 以便 json 记录实际用的参数。
     """
     cid = model.cam("env_camera").id
-    base_pos = np.array([0.65, 0.0, 0.55])
+    # 基准位姿/内参一律取自模型（= model/so_arm101.xml 里的 env_camera），不写死数字：
+    # 2026-10 复刻真机 _fixed 视角时，这里曾把 pos 拽回旧的 0.65 0 0.55，
+    # 导致"改了 XML 却完全没生效"。`render_episode` / `extrinsics_only` 都是先用
+    # _pristine_model() 还原再调用本函数，所以此刻 cam_pos/cam_fovy 就是 XML 里的名义值。
+    base_pos = np.array(model.cam_pos[cid], dtype=float).copy()
+    base_fovy = float(model.cam_fovy[cid])
     j = cfg["camera"]["env_pos_jitter_m"]
     rng = np.random.default_rng(cfg["seed"])
     pos = base_pos + rng.uniform(-j, j, 3)
-    fovy = 30.0 + cfg["camera"]["env_fovy_delta_deg"]
+    fovy = base_fovy + cfg["camera"]["env_fovy_delta_deg"]
     model.cam_pos[cid] = pos
     model.cam_fovy[cid] = fovy
     # 朝向抖动（2024-11 新增）：外参只抖位置不够，视线方向也要抖 ±2°，
