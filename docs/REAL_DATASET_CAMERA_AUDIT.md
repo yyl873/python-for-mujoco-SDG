@@ -171,3 +171,71 @@ env -u PYTHONHOME -u PYTHONPATH /usr/bin/python3 tools/export_real_env_frames.py
 ```bash
 env -u PYTHONHOME -u PYTHONPATH /usr/bin/python3 tools/scan_env_framing.py --frames 24 --workers 8
 ```
+
+## 9. 更正 §8 的两点：mp4 是打包容器 / 垫子到底被切多少
+
+### 9.1 「47 个 mp4」不是 47 条数据：lerobot v3.0 把多条 episode 打包进一个 mp4
+
+`info.json` 里 `video_files_size_in_mb: 200`，录制脚本把多段 episode 顺序拼进同一个 mp4，
+每条 episode 的时间段记在 `meta/episodes/**/*.parquet` 的
+`videos/<相机>/{file_index, from_timestamp, to_timestamp}` 里。所以按文件数出来的数会远小于实录条数：
+
+| 数据集 | 实录条数 | 总帧数 | env 路 mp4 文件 | 每个 mp4 装几条 |
+|---|---|---|---|---|
+| real_train_fixed | 139 | 62273 | 16 | 8.7 |
+| yyl100_dataset_fixed | 151 | 67649 | 16 | 9.4 |
+| holdout_fixed | 12 | 5376 | 12 | 1.0 |
+| real_train_corners | 22 | 8588 | 1 | 22.0 |
+| holdout_corners | 8 | 3282 | 1 | 8.0 |
+| yyl100_corners | 30 | 11870 | 1 | 30.0 |
+| **合计** | **362** | | **47** | |
+
+按 episode 逐条测（`tools/scan_env_framing.py --unit episode`，读上表的时间段逐条采样 8 帧）：
+
+| 数据集 | 条数 | 每帧都贴边 | 部分贴边 | 从不贴边 |
+|---|---|---|---|---|
+| real_train_fixed | 139 | **139** | 0 | 0 |
+| yyl100_dataset_fixed | 151 | **151** | 0 | 0 |
+| holdout_fixed | 12 | **12** | 0 | 0 |
+| real_train_corners | 22 | 4 | 3 | 15 |
+| holdout_corners | 8 | 1 | 1 | 6 |
+| yyl100_corners | 30 | 5 | 5 | 20 |
+| **合计** | **362** | **312** | **9** | **41** |
+
+结论不变但更精确：**`_fixed` 三批 302 条实录全部（302/302）垫子被裁**；`_corners` 三批才是另一种机位。
+
+### 9.2 单帧判「贴边」会被机械臂遮挡污染，改用「绿色掩码时序并集」
+
+机械臂压在垫子上时绿色连通域会缩小、可能离开边框，于是同一机位会被判成「完整」。
+把 16 帧的绿色掩码做并集（遮挡在不同帧落在不同位置，并集能还原垫子真实投影范围）后：
+
+| 数据集 | 文件 | 垫子可见 x 范围 | 可见 y 范围 | 可见 宽×高 (px) | 面积% | 贴边 |
+|---|---|---|---|---|---|---|
+| real_train_corners | 1 | 358 ~ 639 | 162 ~ 421 | 282 × 260 | 15.5 | 右 |
+| holdout_corners | 1 | 384 ~ 639 | 160 ~ 417 | 256 × 258 | 16.1 | 右 |
+| yyl100_corners | 1 | 352 ~ 639 | 160 ~ 419 | 288 × 260 | 17.0 | 右 |
+| real_train_fixed | 16 | 370~420 ~ 639 | 284~291 ~ 479 | 220~270 × **189~196** | 12.1~15.1 | 右 + **下** |
+| holdout_fixed | 12 | 371~435 ~ 639 | 284~291 ~ 479 | 205~269 × **189~196** | 11.5~14.2 | 右 + **下** |
+| yyl100_dataset_fixed | 16 | 370~420 ~ 639 | 284~291 ~ 479 | 220~270 × **189~196** | 12.1~14.9 | 右 + **下** |
+
+读法（垫子真实直径按可见高度 ~258~270 px 估）：
+
+- **`_corners` 三批：垂直方向完整**（可见高度 256~260 ≈ 直径），只有**右缘正好压在右边框**上
+  —— 属于像素级的「蹭边」，不是被切掉一大块。
+- **`_fixed` 三批：可见高度只有 189~196 px**，比直径少 **65~80 px（约 25~30%）**
+  —— 垫子**下缘被画面切掉**，同时右缘也压在边框上。
+
+所以 §8 里「垫子被右下角裁掉」这个说法对 `_fixed` 成立（下边确实被切），对 `_corners` 应改成
+「右缘正好贴边框、上下完整」。
+
+产物：`inspect/env_framing/env_framing_episodes.csv`、`summary_env_framing_episodes.txt`（按条）、
+`inspect/env_framing/env_union.csv`、`summary_env_union.txt`（按时序并集，抗遮挡）。
+
+复核：
+
+```bash
+# 按实录逐条（需要 pyarrow）
+PYTHONPATH=$PWD/.cache/pylibs env -u PYTHONHOME /usr/bin/python3 tools/scan_env_framing.py --unit episode --frames 8 --workers 8
+# 抗遮挡的绿色并集
+env -u PYTHONHOME -u PYTHONPATH /usr/bin/python3 tools/scan_env_framing.py --unit union --frames 16 --workers 8
+```
