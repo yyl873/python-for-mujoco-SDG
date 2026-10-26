@@ -239,3 +239,76 @@ PYTHONPATH=$PWD/.cache/pylibs env -u PYTHONHOME /usr/bin/python3 tools/scan_env_
 # 抗遮挡的绿色并集
 env -u PYTHONHOME -u PYTHONPATH /usr/bin/python3 tools/scan_env_framing.py --unit union --frames 16 --workers 8
 ```
+
+## 10. 用仿真复刻这个视角（已落地）
+
+用户决定：不改真机相机，让仿真 `env_camera` 复刻真机 `_fixed` 批次的视角。
+
+### 10.1 解算：只动 pos，xyaxes / fovy 不变
+
+目标由 §9 的绿色并集实测给出（640×480）：垫子宽 **270 px**、左缘 **370**、右缘 **639**（压在右边框）、
+上缘 **286**（284~291），下缘超出画面 → 可见高 **194 px**（真机 189~196）。
+
+`tools/solve_env_camera.py` 用针孔模型（fovy=30 → f_px=895.69）迭代：
+像素宽度反解深度（`w ∝ 1/depth`），再由目标像素反投影出相机位置，每次都用与真机**同一个绿色检测器**复测。
+一次迭代即收敛：
+
+| | pos | 实测垫子 bbox | 宽×高 | 可见高 |
+|---|---|---|---|---|
+| 改前 | `0.65 0 0.55` | (322,178,581,398) | 260×221 | 未切，整块在画面内 |
+| **改后** | **`0.5814 -0.0418 0.5919`** | **(370,286,639,479)** | **270×194** | **194 px（下缘被切）** |
+| 真机 `_fixed` 目标 | — | (370,286,639,479) | 270×~258 | 189~196 px |
+
+即：相机沿视线方向前移约 2.4 cm、向 −y 侧移约 4.2 cm（让垫子落到右下角并被底边切掉）。
+
+### 10.2 顺带修掉一个会让改动"静默失效"的坑
+
+`collect/collect.py::apply_camera_jitter` 原本把基准位姿写死成 `np.array([0.65, 0.0, 0.55])`，
+只改 XML 的话每条 episode 都会被它拽回旧值、而且**画面看起来完全正常**，属于最难查的那类静默错。
+已改成从模型现读：
+
+```python
+base_pos  = np.array(model.cam_pos[cid], dtype=float).copy()   # = XML 里的 env_camera
+base_fovy = float(model.cam_fovy[cid])
+```
+
+（`render_episode` / `extrinsics_only` 都是先 `_pristine_model()` 还原再调用，所以此刻就是名义值。）
+
+### 10.3 抖动之后还剩多少"贴着边框"
+
+`tools/probe_env_cam_jitter.py` 用 12 个 seed 跑 `apply_camera_jitter` + 渲染 + 同一个绿色检测器：
+
+| 指标 | 仿真（抖动后 12 帧） | 真机 `_fixed`（302 条） |
+|---|---|---|
+| 贴下边框 | **100%**（12/12） | **100%** |
+| 完全在画面内 | **0%** | 0% |
+| 贴右边框 | 50%（6/12） | 100% |
+| 垫子左缘 x0 | 336~423 | 370~420 |
+| 垫子上缘 y0 | 260~303 | 284~291 |
+| 垫子宽 | 217~284 | 205~270 |
+
+读法：**"下缘被切"这个主要特征在抖动下 100% 保住**，`0%` 整块进画面也保住了；
+差异在于仿真的抖动（±1~3 cm / fovy±3° / yaw±2° / pitch±2°）比真机批次内的实际位移大，
+所以「贴右边框」只有一半、上缘散布 ±20 px。这是**刻意保留的域随机化**，不是 bug ——
+想更贴真机就把 `camera.env_pos_jitter_m` 压小，想更鲁棒就保持。
+
+### 10.4 版本与既有产物
+
+- `DATASET_VERSION` 由 `sdg-v6` → **`sdg-v7`**（`collect/collect.py`），`docs/PHYSICS_FACTS.md` §1/§7/§8 同步。
+- `scripts/` 里的 1000 条母本仍是 **sdg-v6（旧相机）**，`ep_000000.json` 里 `dataset_version` 可查；
+  `videos/`、`dataset/`、`inspect/env_cam_20/sim__*.png` 也全是旧相机出的。
+  **要得到新视角的数据必须重跑采集**（`collect/collect.py --reset …`），否则仿真侧仍是旧取景。
+- 演示管线自检（`render/test_render.py record` + `render`）在新相机下 15 项全部 ✅，
+  其中「物块像素数 首/中/末 = 4371/5378/5636（需 >200）」确认药盒仍在画面里。
+
+### 10.5 复核命令
+
+```bash
+# 解算（只打印，不改文件）
+env -u PYTHONHOME -u PYTHONPATH MUJOCO_GL=egl /usr/bin/python3 tools/solve_env_camera.py
+# 抖动后取景分布
+env -u PYTHONHOME -u PYTHONPATH MUJOCO_GL=egl /usr/bin/python3 tools/probe_env_cam_jitter.py --n 12
+# 演示管线自检
+env -u PYTHONHOME -u PYTHONPATH MUJOCO_GL=egl /usr/bin/python3 render/test_render.py record --out <tmp>
+env -u PYTHONHOME -u PYTHONPATH MUJOCO_GL=egl /usr/bin/python3 render/test_render.py render --out <tmp> --npz <tmp>/episode.npz
+```
