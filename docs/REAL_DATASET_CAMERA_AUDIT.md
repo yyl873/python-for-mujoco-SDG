@@ -13,8 +13,8 @@
 | real_train_corners | **环境相机** | 腕部相机 | 无需改动 |
 | holdout_corners | **环境相机** | 腕部相机 | 无需改动 |
 | yyl100_corners | **环境相机** | 腕部相机 | 无需改动 |
-| yyl100_lance_fixed | 全为 Lance 格式无 mp4，无法解码验证 | 同左 | 仅从元数据推断「疑似同样互换」，见 §5 |
-| yyl100_lance_corners | 同上 | 同上 | 仅从元数据推断「标签正确」，见 §5 |
+| yyl100_lance_fixed | Lance 格式无 mp4；元数据血缘证明 env 路=腕部画面 | 同左 | **同样互换，未修**，见 §5 |
+| yyl100_lance_corners | Lance 格式无 mp4；元数据血缘证明 env 路=环境相机 | 同左 | 标签正确，见 §5 |
 
 修复后的实测值（见表末「复核」章节的命令）：
 
@@ -82,17 +82,30 @@ PYTHONPATH=.cache/pylibs env -u PYTHONHOME /usr/bin/python3 tools/fix_cam_labels
 
 ## 5. 未覆盖 / 存疑
 
-- **yyl100_lance_fixed、yyl100_lance_corners**：视频以 Lance 格式存于 `videos.lance/`（各 2.3 GB），
-  没有 mp4 文件，本机没有可用的 `lance` 模块（`~/miniforge3/envs/lerobot` 与 `lerobot312` 两个 conda 环境
-  目前一启动就崩，系统 Python 无 lance/pyarrow），因此**无法解码验证**。
-  只能按 §3 的元数据规则推断：`yyl100_lance_fixed` 的 features 首相机是 `wrist` → 疑似同样互换；
-  `yyl100_lance_corners` 首相机是 `env` → 标签正确。
-  正确做法是**先修 mp4 版再重跑这两份的转换脚本**，而不是手工改 Lance。
-- 本机 conda 环境（`~/miniforge3/envs/lerobot`、`lerobot312`）启动即崩，与本次修改无关，但会让依赖它们的
-  导出脚本（`collect/export_lerobot.py`）暂时跑不起来。
-- 真机**环境相机的取景本身有问题**：20 张环境相机帧里 20 张的绿色拾取垫都被画面右边和下边裁掉
-  （包围盒恒为 `x1=639 / y1=479`）。这和"相机视角好像变了"一致，属于**物理相机朝向**问题，
-  与标签互换无关，是否要调真机相机或反过来把 sim 的 `env_camera` 对齐到这个歪视角，需另行决定。
+- **yyl100_lance_fixed / yyl100_lance_corners 仍然没有修**：视频以 Lance 格式存在 `videos.lance/`
+  （各 2.3 GB，schema 为 `video_key, chunk_index, file_index, file_size, moov_*, kf_*, video_bytes(blob)`），
+  每个 (相机, chunk, file) 一行。已确认的事实（`meta/episodes` 里逐 episode 的逐路像素统计，151/30 个 episode 全对齐）：
+
+  | 数据集 | 相关性 lance.env~mp4.env | lance.env~mp4.wrist | 平均绝对差 | 判定 |
+  |---|---|---|---|---|
+  | yyl100_lance_fixed ↔ yyl100_dataset_fixed | −0.17 | **+1.0000** | **0.0000** | env 路装的是腕部画面 → **同样互换，未修** |
+  | yyl100_lance_corners ↔ yyl100_corners | **+1.0000** | −0.58 | **0.0000** | 标签正确 |
+
+  注意这是**元数据血缘**证据（lance 版的统计量与修复前 mp4 版逐位相同，说明它就是从那份跨标签的数据转出来的），
+  不是像素级验证 —— 这个 lance 版本（13.0.0）没有 `ds.blobs()` 读取接口，`video_bytes` 只能拿到
+  `{kind, position, size, blob_id, blob_uri}` 结构，取不出字节来解码。
+  正确做法是**先修 mp4 版（已完成）再重跑这两份的转换脚本**，而不是手工改 Lance。
+- **conda 环境的正确启动方式**（之前记的"环境一启动就崩"是我调用方式不对）：
+  ```bash
+  env -u PYTHONHOME -u PYTHONPATH bash -lc '
+    source ~/miniforge3/bin/activate && conda activate lerobot312 &&
+    export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH && python -c "import lance,pyarrow,av"'
+  ```
+  三个坑缺一不可：DSH 会话里 `PYTHONHOME` 被 AppImage 污染（必须先 `env -u`）、必须走 `conda activate`
+  （直接调 `envs/lerobot312/bin/python` 会崩）、必须把 `$CONDA_PREFIX/lib` 放到 `LD_LIBRARY_PATH` 前面
+  （否则 `/lib/x86_64-linux-gnu/libstdc++.so.6` 太旧，报 `CXXABI_1.3.15 not found`）。
+  实测可用版本：lance 13.0.0 / pyarrow 26.0.0 / av 15.1.0。
+- 真机**环境相机的取景分两个批次**，详见 §8。
 
 ## 6. 复核方式
 
@@ -118,4 +131,43 @@ env -u PYTHONHOME -u PYTHONPATH /usr/bin/python3 tools/export_real_env_frames.py
 | `inspect/cam_scan/summary.txt` | 按数据集/流聚合的结论 + 异常与线索 |
 | `inspect/cam_scan/montage_all_files.png` | 94 个文件各一帧缩略图，绿=固定相机、蓝=随臂相机 |
 | `inspect/cam_scan/montage_env_vs_wrist_pairs.png` | 每个数据集一行：[env]×2 时间点 ｜ [wrist]×2 时间点 |
+| `tools/scan_env_framing.py` | 量环境相机取景：垫子中心/直径/贴边/逐帧跳变 |
+| `inspect/env_framing/` | 47 个环境相机文件的取景明细 + 汇总 + 取景拼图 |
 | `inspect/env_cam_20/` | 20 张真机环境相机帧（640×480）+ 3 张仿真参考 + `montage_env_vs_sim.png` + `index.txt` + `pad_stats.txt` |
+## 8. 环境相机取景实测：是「全部这个视角」还是「只有一部分」
+
+测法：`tools/scan_env_framing.py` —— 每个环境相机 mp4 均匀采样 24 帧，用最大绿色连通域当拾取垫，
+记录中心 `(cx, cy)`（0~1 归一化）、占画面面积 `area%`、贴边情况 `touches`（`R`=贴右、`B`=贴下、`inside`=完整）。
+
+| 批次 | 文件 | 采样帧 | 垫子中心中位数 | 直径(px) | 完整帧占比 | 贴边帧占比 | 贴哪边 |
+|---|---|---|---|---|---|---|---|
+| real_train_fixed | 16 | 384 | (0.817, 0.837) | 212~268 | **0%** | **100%** | 右 + 下 |
+| yyl100_dataset_fixed | 16 | 384 | (0.817, 0.833) | 212~268 | **0%** | **100%** | 右 + 下 |
+| holdout_fixed | 12 | 288 | (0.822, 0.833) | 203~268 | **0%** | **100%** | 右 + 下 |
+| real_train_corners | 1（22 ep） | 24 | (0.859, 0.639) | 234 | 75% | 25% | 右 |
+| yyl100_corners | 1（30 ep） | 24 | (0.852, 0.634) | 240 | 75% | 25% | 右 |
+| holdout_corners | 1（8 ep） | 24 | (0.860, 0.645) | 217 | 83% | 17% | 右 |
+
+结论：
+
+1. **不是随机"部分"，而是按批次分两个机位**。三个 `_fixed` 批次共 44 个视频、1056 个采样帧，
+   **每一个文件、每一帧**垫子都同时贴住右边和下边（只有极少数帧只贴下边）—— 相机被固定成这样，不是偶发。
+2. 三个 `_corners` 批次是**另一种机位**：垫子在 (0.85, 0.64)，直径小约 13%，多数帧完整，约 1/5 帧蹭到右边框。
+   两批之间垫子中心纵向差 **0.20 个画面高 ≈ 96 px**，直径差约 13% —— 相当于相机被抬高/前移过。
+3. **批次内部没有中途移动**：逐帧时间线（每个文件 40 个采样点）里 `cy` 只在 ±0.03~0.06 内抖动，
+   不存在台阶式跳变；`cx` 的极差 0.05~0.24 来自机械臂遮挡垫子造成的检测抖动，不是相机移动。
+4. 文件之间 `diam` 在 212~268 之间波动、而 `cx/cy` 几乎不动 —— 遮挡严重（臂压在垫子上）的文件测出的
+   可见绿区更小，属于检测侧效应，不代表机位变了。
+
+对照本仓库仿真：`videos/*_env.mp4` 里垫子中心 (0.71, 0.60)、直径 260 px，**更像 `_corners` 那批**
+（cy 0.60 vs 0.64、直径 260 vs 234），完全不像 `_fixed` 那批（cy 0.83，垫子被右下角切掉）。
+
+产物：`inspect/env_framing/env_framing.csv`（47 个文件逐文件）、
+`inspect/env_framing/summary_env_framing.txt`、`inspect/env_framing/montage_env_framing.png`
+（每个数据集一行，早/中/晚三帧，十字标出垫子中心，贴边帧标题变橙色）。
+
+复核：
+
+```bash
+env -u PYTHONHOME -u PYTHONPATH /usr/bin/python3 tools/scan_env_framing.py --frames 24 --workers 8
+```
