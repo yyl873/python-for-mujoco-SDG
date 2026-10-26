@@ -52,6 +52,8 @@ def main(argv=None) -> int:
     ap.add_argument("--eval-steps", type=int, default=0)
     ap.add_argument("--video-backend", default=None, help="pyav / torchcodec（默认沿用 lerobot 默认）")
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--resume-config", default=None,
+                    help="--resume 时必须给：checkpoint 里的 pretrained_model/train_config.json 路径")
     ap.add_argument("--dry-run", action="store_true", help="只打印解析出的 argv，不启动训练")
     args = ap.parse_args(argv)
 
@@ -71,6 +73,7 @@ def main(argv=None) -> int:
         "--policy.type=act",
         "--policy.use_vae=false",
         f"--policy.repo_id={policy_repo}",
+        "--policy.push_to_hub=false",
         f"--output_dir={args.output}",
         f"--job_name={job}",
         f"--policy.device={args.device}",
@@ -94,6 +97,21 @@ def main(argv=None) -> int:
     if args.video_backend:
         argv_list.append(f"--dataset.video_backend={args.video_backend}")
     if args.resume:
+        cfg_path = args.resume_config
+        if cfg_path is None:
+            # 自动找 output_dir 下最新 checkpoint 的 train_config.json
+            import json as _json
+            cands = sorted(Path(args.output).glob("checkpoints/*/pretrained_model/train_config.json"))
+            if not cands:
+                print(f"[fail] --resume 需要 train_config.json，但 {args.output}/checkpoints/*/ "
+                      f"下没找到；用 --resume-config 显式指定", flush=True)
+                return 3
+            cfg_path = str(cands[-1])
+        if not Path(cfg_path).is_file():
+            print(f"[fail] --resume-config 不存在: {cfg_path}", flush=True)
+            return 3
+        print(f"[resume] config_path={cfg_path}", flush=True)
+        argv_list.append(f"--config_path={cfg_path}")
         argv_list.append("--resume=true")
 
     if args.dry_run:
