@@ -18,6 +18,13 @@
 | `scripts/` | SDG 母本（1000 个 `npz`/`json` + 索引） | `scripts/run_1000.sh` 调用 `collect/` |
 | `inspect/` `logs/` | 排查图与运行回执 | `tools/inspect_episode.py`、`tools/run_pipeline.py` |
 
+真机数据集相关的三个工具脚本（含一次相机标签互换事故的完整记录）：
+
+👉 **[`docs/REAL_DATASET_CAMERA_AUDIT.md`](docs/REAL_DATASET_CAMERA_AUDIT.md)** ——
+真机数据集的 `observation.images.env` / `.wrist` 两路相机标签曾经互换（三个 `_fixed` 数据集），已修正。
+`tools/scan_real_cams.py`（逐文件判相机）、`tools/fix_cam_labels.py`（四处同步互换 + 回滚）、
+`tools/export_real_env_frames.py`（导出环境相机画面）。
+
 环境前置（本机踩过的坑，不设会直接失败）：
 
 ```bash
