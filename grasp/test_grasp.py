@@ -512,7 +512,7 @@ def main():
     gx, gy = p0[0] + GRASP_XY_OFFSET[0], p0[1] + GRASP_XY_OFFSET[1]
     q_abv, e2 = a.ik([gx, gy, APPROACH_Z], q_ret)
     print(f"  正上方    z={APPROACH_Z}   err={e2*1000:.2f}mm  (横向补偿 dx={GRASP_XY_OFFSET[0]*1000:+.1f} dy={GRASP_XY_OFFSET[1]*1000:+.1f} mm)")
-    q_gsp, e3 = a.ik([p0[0], p0[1], args.gz], q_abv)
+    q_gsp, e3 = a.ik([gx, gy, args.gz], q_abv)  # ★ 必须带 GRASP_XY_OFFSET，否则下探段指垫扫盒（43 碰撞步）
     print(f"  抓取点    z={args.gz}   err={e3*1000:.2f}mm")
     print(f"  q_grasp = {np.round(q_gsp, 5).tolist()}")
 
