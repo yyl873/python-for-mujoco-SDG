@@ -12,6 +12,9 @@
 /.mplcache/
 /.tmp-sessfix/
 /.tmp_*.txt
+/.scratch/
+/.dsh-tmp/
+/.dsh/
 __pycache__/
 *.py[cod]
 .venv/
