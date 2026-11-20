@@ -545,17 +545,32 @@ lift p50 0.0 mm                     ← 进场时药盒还没被抬起来（抓�
   --dataset.repo_id=local/sim156_plus_dagger3 \
   --dataset.root=/home/yyl/deepseek-harness/rl/dagger_ds/sim156_plus_dagger3 \
   --policy.type=act \
+  --policy.repo_id=local/act_dagger_ft \
   --policy.pretrained_path=/home/yyl/lerobot/outputs/train/act_sim156_pre/checkpoints/last/pretrained_model \
+  --policy.push_to_hub=false --save_checkpoint_to_hub=false \
   --batch_size=8 --steps=10000 --save_freq=2500 \
   --output_dir=/home/yyl/lerobot/outputs/train/act_dagger_ft \
   --seed=1000 --num_workers=4
 ```
 
+★ 这三条是**必须的**，少一条就跑不起来（2026-11-20 在沙箱里逐条试出来的）：
+
+- `--policy.repo_id=...`：本机 lerobot 0.6.2 的 `train.py::validate()` 在**没有 policy repo_id 时直接抛**
+  `ValueError: 'repo_id' argument missing`（它以为你要推 Hub）。原始 sim156 训练配置里也是
+  `policy.repo_id='local/act_sim156_pre'`。
+- `--policy.push_to_hub=false --save_checkpoint_to_hub=false`：不推 Hub（离线机器上也别让它去试）。
+- 若 `~/.cache/huggingface` 不可写，再加 `HF_HOME=<可写目录> HF_DATASETS_CACHE=$HF_HOME/datasets`
+  （沙箱里就是被这个只读缓存卡住的，报 `OSError: [Errno 30] Read-only file system: ...parquet...lock`）。
+
 - `--steps=10000` ≈ 1 个 epoch（80 196 帧 / batch 8 = 10 025 步/epoch）。当初 `sim156` 训了
   17 700 步（≈2 epoch）。**建议先跑到 10 000 停**：纠正帧只占 11.7%，跑太多容易把母本能力冲掉；
   跑完不满意再 `--resume` 续到 20 000。
 - 第一次跑先 `--steps=200` 试通，看日志里的 `s/step` 估总时长，再决定要不要减步数。
+- **沙箱（CPU）实测基准**：`batch_size=2` 时 **1.3 s/step**（`updt_s≈1.15`，数据侧只占 0.03 s）。
+  按线性外推 `batch_size=8` ≈ 4~5 s/step → 10 000 步在 CPU 上要 12 h 量级，
+  所以这一步必须在你那张能看到 `/dev/nvidia*` 的终端跑。
 - 注意本机 lerobot 的选项名是 `--policy.pretrained_path`（没有 `--policy.path`）。
+- 微调时打印的 `lr:1.0e-05` 就是 ACT 预设值，和当初训 sim156 一致，**别手动调大**。
 
 ### 13.2 评测（沙箱 CPU 也能跑，30 条约 3~5 min）
 
@@ -564,18 +579,28 @@ cd /home/yyl/deepseek-harness
 env -u PYTHONHOME -u PYTHONPATH MUJOCO_GL=egl LP_NUM_THREADS=8 \
     .venv-rl/bin/python rl/eval_ab.py \
     --base /home/yyl/lerobot/outputs/train/act_dagger_ft/checkpoints/last/pretrained_model \
-    --episodes 100-129 --seeds 1 --judge strict \
-    --skip-base --base-from rl/eval/ab_base_heldout_strict.json \
+    --episodes 100-129 --seeds 3 --judge strict \
     --out rl/eval/ab_dagger_ft.json
+# 基座对照只用同一条命令换 --base sim156（约 6 min/90 次 rollout），别用 --skip-base --
+# base-from 的 30 条旧结果：那是 seeds=1，与 seeds=3 不可比，见 §14.4
 ```
+
+★ `--seeds 3`（90 次 rollout）不是可选：§14 实测 30 次 rollout 的结论会被噪声地板淹掉。
 
 - `--base` 可以传路径（`base_policy.make_base` 里 `CKPTS.get(name, name)`，不认识的名字就当路径）。
 - `--skip-base --base-from rl/eval/ab_base_heldout_strict.json` 复用母本基座的 30 条结果
   （base 对固定 seed 是确定性的：8/30 = 26.7%），只跑新臂，省一半时间。
-- **判据不是"成功率变高了"**：要用同一批 episode 的配对 McNemar + `clean_success` 审计
-  （`rl/audit_hack.py`），因为 §5 已经证明"成功率"可以被"撞翻早退"刷出来。
+- **判据不是"成功率变高了"**：主指标是 `clean_success`（成功且不深压盒/不歪盒），
+  同一批 (episode, seed) 的配对 McNemar，再加 `rl/audit_hack.py` 的作弊审计。
+  §14.2 实测：3 步微调能让 success 从 12/90 涨到 35/90，而 clean 只从 10/90 到 12/90 ——
+  **只看 success 会被自己的指标骗**。
+- **训练要跑 ≥3 个 seed**（`--seed 1000/1001/1002`），报三个数的均值和区间；
+  §14.2 实测同命令换 seed，3 步微调能是 35/90 也能是 6/90 —— 单 seed 的结果没有意义。
 
 ### 13.3 如果第 3 步也证明不了效果
+
+判定"证明不了"的标准先定死：**微调后 clean_success 相对基座的配对 McNemar p < 0.05，
+并且 3 个训练 seed 的区间不跨过基座**。达不到就按负结果写，不许改判据（见 §14）。
 
 那就把结论按"负结果"写死：ACT 基座在 `scripts/` 这批分布外出生随机化上的失败模式，
 不是"缺一点在线微调"能修好的（§5/§10/§12 三条独立证据：残差无上界空间、三版奖励全无效、
@@ -586,3 +611,57 @@ env -u PYTHONHOME -u PYTHONPATH MUJOCO_GL=egl LP_NUM_THREADS=8 \
 - **B2 chunk 级残差**：ACT 每 100 步才重推理，关节级逐步残差和 chunk 语义不匹配；
 - **B7 修基座 → 换数据**：`so-arm101-sim` 的脚本专家能做出 122 mm 抬升、压盒 0.39 mm 的轨迹，
   用它的**出生随机化分布**（而不是 `scripts/` 的）重新生成训练集，可能比 DAgger 更直接。
+
+---
+
+## 14. 第 3 步的前置实验：**held-out 指标本身的噪声地板**（这条比微调结果更重要）
+
+准备微调时先做了一件便宜的事：把"微调 3 步"的 ckpt 拿去评测。3 步是我在沙箱里用 CPU
+跑通命令时顺手产出的，本意只是验证链路。结果它掀出一个比微调本身更关键的问题。
+
+### 14.1 先看权重改了多少
+
+```
+tensors 234 个，完全相同 81 个，有差异 153 个；
+差异张量的最大绝对变化 3.0e-5，最大相对变化 2.9%（发生在 LayerNorm 的 bias 上），
+相对变化中位数 5e-4
+```
+
+也就是说：**这几乎就是母本基座原样**（`lr=1e-5` × 3 步）。
+
+### 14.2 但它把 held-out 成功率拉了一倍
+
+`--episodes 100-129 --seeds 3 --judge strict`（90 次 rollout，配对）：
+
+| 变体 | 训练 seed | 成功 | clean 成功 | 相对基座 |
+|---|---|---|---|---|
+| 基座 `sim156` | — | 12/90 = 13.3% | 10/90 = 11.1% | — |
+| 微调 3 步 | 1000 | **35/90 = 38.9%** | 12/90 = 13.3% | +23 / 保留全部 12 条，McNemar p < 1e-6 |
+| 微调 3 步 | 1001 | **6/90 = 6.7%** | 2/90 = 2.2% | −6 |
+
+分 seed 看也是同一个方向（seed0 8→17、seed1 3→9、seed2 1→9，全是基座成功集被完整保留）。
+
+**然后换一个训练 seed，同一条命令、同一份数据、同样 3 步，结果是 6/90。**
+两个模型的健全性都核过：无 NaN、loss 同量级（0.154/0.081/0.007 vs 0.127/0.082/0.004）、
+同一观测下预测动作只差（pan 3.82° vs 1.03°，其余 <1°）。
+
+### 14.3 结论（必须写进任何后续结论里）
+
+1. **held-out 100-129 的成功率是一个"刀尖"指标**：基座每条都压盒 10~22 mm、贴着成功/失败的
+   边界，动作偏 1° 量级就能整体翻面。3 步微调（权重变化 3e-5）就能让结果在 **6/90 ~ 35/90**
+   之间摆动 —— 这个区间（±15pp）就是**当前评测协议的噪声地板**。
+2. 因此 §5 里那些 ≤5.5pp 的臂间差异（R1 32.2% / R2 18.9% / R3 24.4% / base 26.7%）**本来就
+   小于噪声地板**；§5 当年靠"3 个训练 seed + 配对 McNemar"得出"没有一版打过基座"，方向是对的，
+   但更准确的说法是"**差异被噪声地板淹没了**"。
+3. **成功 ≠ 干净**：3 步微调（seed 1000）把成功从 12/90 抬到 35/90，而 clean 成功只从 10/90 到
+   12/90。也就是说它修的不是"暴力抓"，而是"在仍然深压盒的情况下把盒子拽起来了" —— 正好是
+   §5.2/§6 警告过的脏成功。**第 3 步的主指标必须是 `clean_success`，不是 `success`。**
+4. **协议修正**（已同步到 §13）：评测必须 `--seeds 3`（90 次 rollout）+ 配对 McNemar；
+   微调必须跑 **≥3 个训练 seed** 并报**均值/区间**，不许挑最好那个 seed；
+   报告结论时必须同时给出这条噪声地板。
+
+### 14.4 另一个被这次实验顺带纠正的数字
+
+`rl/eval/ab_base_heldout_strict.json` 是 **`--seeds 1`** 跑的（8/30 = 26.7%，我重跑复现无误）。
+而 `--seeds 3` 的基座是 **12/90 = 13.3%** —— seed 1/2 比 seed 0 苛刻得多（30 次里只成功 4 次）。
+所以"基座 26.7%"只是 seed 0 一个 slice 的数字，**不能当作 90 次评测的基座水平引用**。
