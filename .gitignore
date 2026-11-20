@@ -37,3 +37,6 @@ venv/
 *.log
 # timestamped backups
 *.bak.*
+
+# DAgger 纠正数据集（可重生成）
+/rl/dagger_ds/
