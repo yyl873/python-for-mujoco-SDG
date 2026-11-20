@@ -737,7 +737,34 @@ batch 8 / lr 1e-05（ACT 预设）/ steps 10 000 / save_freq 2 500 / seed 1000
   `ref` 通过审计**且**相位是 `descend/grasp` 的帧，或者换成"发现漂移就把 TCP 退回 10 mm"的
   安全标签）。
 
-### 15.6 还没跑完的部分
+### 15.6 执行状态：**已按用户要求停止**（2026-11-20 23:4x）
 
-`seed 1001` / `1002` 在同一条循环里排队（各约 60 min），结果会自动落到
-`rl/eval/ft/s{1001,1002}_*.json`，`rl/ft_eval_sweep.py --aggregate-only` 一跑就出三 seed 的均值/区间。
+| 项 | 状态 |
+|---|---|
+| seed 1000 | **完整跑完**（10 000 步 / 59 min 57 s），4 个 ckpt 全部评测完 |
+| seed 1001 | **在第 1 186 步被手动停止**（`save_freq=2500`，因此没有 ckpt 落盘） |
+| seed 1002 | 从未启动 |
+| 纯 sim156 控制臂（§15.5） | **未运行**（已排队但随训练一并取消） |
+| 评测轮询器 | 已停止 |
+
+所以 §15 里的负结果**只有 1 个训练 seed 的证据**（n=90 次 rollout、4 个 ckpt 的单调曲线）。
+按 §14 的教训，单 seed 不能证明"换个 seed 就一定不行"；但这条曲线是**随步数单调恶化**且
+7 500 步处配对显著（p=0.031），形态上不像种子彩票。**要写进简历/报告时必须标注"单 seed"。**
+
+恢复方式（随时可续）：
+
+```bash
+# 续跑 seed 1001/1002（各自 60 min）+ 控制臂
+bash -c 'for S in 1001 1002; do /home/yyl/miniforge3/envs/lerobot312/bin/lerobot-train \
+  --dataset.repo_id=local/sim156_plus_dagger3 \
+  --dataset.root=/home/yyl/deepseek-harness/rl/dagger_ds/sim156_plus_dagger3 \
+  --policy.type=act --policy.repo_id=local/act_dagger_ft_$S \
+  --policy.pretrained_path=/home/yyl/lerobot/outputs/train/act_sim156_pre/checkpoints/last/pretrained_model \
+  --policy.push_to_hub=false --save_checkpoint_to_hub=false \
+  --batch_size=8 --steps=10000 --save_freq=2500 \
+  --output_dir=/home/yyl/lerobot/outputs/train/act_dagger_ft_$S --seed=$S --num_workers=4; done'
+
+# 再扫一遍评测汇总（会自动带上新 seed）+ 重画曲线
+env -u PYTHONHOME -u PYTHONPATH MPLCONFIGDIR=$PWD/.mplcache \
+    .venv-rl/bin/python rl/ft_eval_sweep.py
+```
