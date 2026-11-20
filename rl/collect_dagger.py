@@ -280,6 +280,8 @@ def run_episode(env, eid: int, pf: ExpertPortfolio, args, *,
     ep, meta = env._episodes[eid]
     ref_ctrl = np.asarray(ep["ctrl"], float)                   # (N,6) rad
     n_ref = len(ref_ctrl)
+    phases = [str(x) for x in ep["phase"]] if "phase" in ep else None
+    allow = {x.strip() for x in str(args.allow_phases).split(",") if x.strip()}
 
     obs, info = env.reset(seed=eid + args.seed)
     task = info.get("task") or meta.get("instruction") or TASK_DEFAULT
@@ -313,7 +315,15 @@ def run_episode(env, eid: int, pf: ExpertPortfolio, args, *,
                 base._pre_cached = None
 
             s_now = pf.snapshot()
-            fired = (s_now["pen"] > args.trigger_pen) or (s_now["tilt"] > args.trigger_tilt)
+            # ★ 阶段门控：搬运段药盒本来就会歪 27~30°（工具俯仰随 TCP 高度线性变化 0.22°/mm，
+            #   见 so-arm101-sim 技能 §6），所以"tilt>25°"在 transport/place 段是**正常行为**。
+            #   首次采集没做门控，实测 2850 个标注步里 915 在 transport、444 在 settle_b —— 一半在
+            #   标正常行为。这里按母本相位 k 只允许抓取相关阶段进场。
+            in_phase = True
+            if args.phase_gate and phases:
+                in_phase = phases[min(k, len(phases) - 1)] in allow
+            fired = in_phase and ((s_now["pen"] > args.trigger_pen)
+                                  or (s_now["tilt"] > args.trigger_tilt))
             # ★ 冷却期：接手窗口结束后必须把控制权还给 ACT 至少 cooldown 步，否则
             #   "穿透一直 > 阈值" 会让专家永久接管（实测占 31% 步，退化成一串 hold）。
             if fired and mode["expert"] is None and k >= 1 and k >= cooldown_until:
@@ -384,8 +394,22 @@ def main(argv=None) -> int:
     ap.add_argument("--trigger-tilt", type=float, default=25.0,
                     help="倾角触发阈值 度（§11 定标：成功 p50 15.5 / 失败 57.4）")
     ap.add_argument("--handover", type=int, default=20, help="专家接管步数（30 Hz，默认 20 ≈ 0.67 s）")
+    ap.add_argument("--phase-gate", dest="phase_gate", action="store_true", default=True,
+                    help="触发器叠加母本相位门控（默认开）。★不开的话 transport/place 段的"
+                         "正常倾斜会占掉一半标签（实测 2850 步里 915 步在 transport）")
+    ap.add_argument("--no-phase-gate", dest="phase_gate", action="store_false")
+    ap.add_argument("--allow-phases", default="approach,descend,grasp,settle_a,lift,settle_b",
+                    help="允许触发的母本相位（逗号分隔），默认抓取相关 6 个阶段")
     ap.add_argument("--cooldown", type=int, default=15,
                     help="窗口结束后交还 ACT 的强制步数（默认 15，防止穿透持续时专家永久接管）")
+    ap.add_argument("--vcodec", default="h264",
+                    help="数据集视频编码器（默认 h264 → ffmpeg 的 libx264）。lerobot 默认 libsvtav1，"
+                         "实测慢 3~4 倍；母本 sim156 的视频本就是 h264（avc1），换它同时提速+对齐口径")
+    ap.add_argument("--crf", type=int, default=23, help="h264 质量（默认 23，越小越清晰越大）")
+    ap.add_argument("--min-frames", type=int, default=4,
+                    help="一条 episode 少于这么多标注帧就不写进数据集（默认 4）。"
+                         "★必须 >1：1 帧视频会让 ffmpeg 的 h264 封装直接抛 "
+                         "av.error.ValueError: Invalid argument")
     ap.add_argument("--keep-forced", action="store_true",
                     help="把 forced=True（四个候选都不合格）的帧也写进数据集。默认丢弃："
                          "这些标签本身违反物理门槛，不可信")
@@ -463,15 +487,23 @@ def main(argv=None) -> int:
         feats = build_features(480, 640)
         repo_id = args.repo_id or f"local/{out.name}"
         if out.exists() and args.resume:
-            ds = LeRobotDataset(repo_id=repo_id, root=out)
+            from lerobot.configs.video import RGBEncoderConfig      # noqa: PLC0415
+            ds = LeRobotDataset.resume(repo_id=repo_id, root=out,
+                                       rgb_encoder=RGBEncoderConfig(vcodec=args.vcodec,
+                                                                    crf=args.crf,
+                                                                    g=2, pix_fmt="yuv420p"))
             print(f"  续采    : 已存在数据集 {out}，episodes={ds.meta.total_episodes} "
                   f"frames={ds.meta.total_frames}")
         else:
             if out.exists():
                 import shutil                                        # noqa: PLC0415
                 shutil.rmtree(out)
+            from lerobot.configs.video import RGBEncoderConfig          # noqa: PLC0415
             ds = LeRobotDataset.create(repo_id=repo_id, fps=30, features=feats,
-                                       root=out, robot_type="so_follower")
+                                       root=out, robot_type="so_follower",
+                                       rgb_encoder=RGBEncoderConfig(vcodec=args.vcodec,
+                                                                    crf=args.crf,
+                                                                    g=2, pix_fmt="yuv420p"))
             print(f"  建库    : {repo_id}  640x480 @30fps")
 
     t_all = time.time()
@@ -489,7 +521,7 @@ def main(argv=None) -> int:
             with Path(args.steps_log).open("a", encoding="utf-8") as fh:
                 for a in audit_rows:
                     fh.write(json.dumps(a, ensure_ascii=False) + "\n")
-        if ds is not None and frames:
+        if ds is not None and len(frames) >= args.min_frames:
             for f in frames:
                 ds.add_frame({"observation.state": f["state"],
                               "action": f["action"],
@@ -497,6 +529,9 @@ def main(argv=None) -> int:
                               "observation.images.wrist": f["wrist"],
                               "task": row["task"]})
             ds.save_episode()
+        if ds is not None and 0 < len(frames) < args.min_frames:
+            print(f"      （{len(frames)} 帧 < --min-frames {args.min_frames}，不入库；"
+                  f"单帧/双帧视频会让 h264 封装失败，实测就是这样崩的）")
         row["done"] = True
         row["wall_s"] = round(time.time() - t_ep, 1)
         rows.append(row)

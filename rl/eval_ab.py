@@ -149,7 +149,7 @@ def main(argv=None) -> int:
                     help="录像录哪一臂（默认 base+R；录基座要配 --video-tag base 且不给 --policy）")
     ap.add_argument("--judge", default="legacy", choices=["legacy", "strict"],
                     help="成败判定口径（必须与训练时一致才可比）：legacy=旧；strict=连续5步洁净成功+掉桌判失败")
-    ap.add_argument("--reward", default="v1", choices=["v1", "v2"],
+    ap.add_argument("--reward", default="v1", choices=["v1", "v2", "v2b"],
                     help="奖励版本（只影响 env 内部回报，不影响成败判定；用于与训练配置一致）")
     ap.add_argument("--res-scale", type=float, default=1.0,
                     help="消融：残差幅度缩放（1.0=训练时的幅度；0.25/0.1 用于判断是否幅度过大）")

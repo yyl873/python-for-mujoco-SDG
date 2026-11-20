@@ -231,6 +231,13 @@ v2 的失败一半来自这个）。另加 `VecNormalize(norm_obs=False, norm_re
 | 三版奖励对比图 | `rl/curves/success_vs_clean_3configs.png` |
 | 代码 | `rl/{base_policy,env_residual,pilot,train,eval_ab,s2_verdict,probe_residual,make_figs,stack_video,audit_hack,plot_amplitude}.py` |
 | **不可引用（含训练泄漏，仅存档）** | `rl/eval/ab_s{0,1,2}_30.json`、`ab_s*_scale0.25.json`、`ab_s0_20_LEGACY.json` |
+| 偏离诊断（§11） | `rl/deviation_probe.py`、`rl/eval/deviation_probe.json` |
+| DAgger 采集（§12） | `rl/collect_dagger.py`、`rl/mix_dataset.py` |
+| 纠正集数据集（第 2 轮，正式） | `rl/dagger_ds/dagger_v2`（108 条 / 3 124 帧） |
+| 纠正集数据集（第 1 轮，无相位门控，仅存档对照） | `rl/dagger_ds/dagger_v1`（80 条 / 2 756 帧） |
+| 混合微调数据集 | `rl/dagger_ds/sim156_plus_dagger3`（480 条 / 80 196 帧，纠正帧 11.7%，1.2 GB，可重生成） |
+| 采集统计与逐标注步审计 | `rl/eval/dagger{,2}_collect.json(.jsonl)`、`rl/eval/dagger{,2}_steps.jsonl` |
+| 基座对照（母本池，配对用） | `rl/eval/ab_base_trainpool.json`（0-99）、`rl/eval/ab_base_pool130.json`（130-179） |
 
 ---
 
@@ -326,5 +333,256 @@ takeover = (penetration_mm > 14.0) or (box_tilt_deg > 25.0)
 
 - 采集本身 = ACT 推理 + 仿真，**沙箱 CPU 就能跑**（约 25 ms/步 × 450 步 × 30 条 ≈ 6 min/轮）；
 - 只有在**微调 ACT**（第 3 步）时才需要你的 GPU；
-- 采集脚本接口已经定好：`on_trigger → 专家(脚本 IK)接管 15 步 → 记录 (两路图像, state, 专家动作)`，
-  数据格式与 lerobot v3 对齐，可直接混进现有 `sim156` 训练集（建议 8:2 混）。
+- 采集脚本已经落地并跑完两轮，实际做法与这里的初版设想不同（不是"脚本 IK 接管"，
+  而是**审计后的专家组合**），见 §12 —— 第 1 轮还因此发现 `tilt > 25°` 在搬运段会常态命中。
+
+---
+
+## 12. 第 2 步：DAgger 纠正数据采集（`rl/collect_dagger.py`）
+
+### 12.1 为什么不是"脚本专家直接接管"
+
+`collect/collect.py` 的脚本专家是**开环路点脚本**（三段接近 → 下探 → 合爪 → 抬升 → 搬运），
+它从标定起点出发、按固定步数执行，**从来没被设计成"从歪掉的状态恢复"**。而 §11 实测的失败
+状态是穿透 18 mm、药盒倾斜 57°、夹爪已经捅进盒体 —— 把控制权硬切给它，得到的是同一条失败
+轨迹，标签还是错的。所以在第 2 步里，"专家"必须是一个**能看状态答动作**的东西。
+
+### 12.2 做法：审计后的专家组合（audited expert portfolio）
+
+每个需要标注的控制步 k，最多准备 4 个候选动作，按优先级排队：
+
+| 候选 | 含义 | 来源 |
+|---|---|---|
+| `ref` | 母本轨迹**同一相位** k 的动作 | `ep_XXXXXX.npz` 的 `ctrl[k]`（专家本人的动作） |
+| `blend` | 半步回正 `0.5·(当前 + ref)` | 上面两者平均 |
+| `retract` | 当前 TCP 上抬 10 mm 的 IK 解（夹爪指令不动） | `Arm.ik` |
+| `hold` | 保持当前关节角（冻结） | 当前 `ctrl` |
+
+每个候选在**克隆的 `MjData`** 上向前滚 `--audit-steps` 个控制步（默认 1 = 33 ms），
+用三条物理判据验收，全部相对**当前**状态：
+
+```
+pen_after  <= max(pen_now, 20.8) + 1.0 mm      # 不把手指更深地捅进盒子
+tilt_after <= max(tilt_now, 25.0) + 1.0°       # 不把盒子推得更歪
+lift_after >= lift_now - 8.0 mm                # 不把已经抬起来的盒子丢掉
+```
+
+按优先级取**第一个通过**的候选；四个都不通过就取违反量最小者并标 `forced`（**默认不写进数据集**
+—— 那些标签本身违反物理门槛，不可信）。这样每个标签都是"在这个状态下**实测**不会让物理恶化
+的动作"，而不是靠信念。
+
+控制流程：触发器（§11 定标：`pen > 14 mm` 或 `tilt > 25°`）→ 专家接管 `--handover` 步（默认 20）
+→ 清空 ACT 的 action chunk 队列（等于"重新规划"）→ 交还 ACT。窗口结束后有 `--cooldown` 步
+（默认 15）强制冷却，否则"穿透一直超阈值"会让专家**永久接管**（首次实测就撞上了：占 31% 控制步、
+产出一串 `hold`）。
+
+★ 全程用 `env.step()` 驱动（不重写 step），因此物理、成败判定、`info` 语义与 `rl/eval_ab.py`
+完全一致，不存在口径漂移。
+
+### 12.3 数据集的图像口径
+
+标签帧的两路图像 = `ObsAdapter(raw)` 的输出，即**过 `SensorModel`、与 `sim156` 训练集同分布**
+的帧（母本 sim156 的视频就是过 SensorModel 后编码的），不是原始锐利渲染图。
+实测像素统计对齐（抽样 9 帧 vs sim156 抽 10 帧，`observation.images.env`：均值 142.2 / 130.4，
+标准差 53.1 / 51.0）。
+
+### 12.4 实测结果（第 1 轮：无阶段门控，`rl/dagger_ds/dagger_v1`）
+
+母本池 `scripts/0-99`（100 条），基座 `sim156`，残差 = 0，`judge=strict`：
+
+| 量 | 数值 |
+|---|---|
+| 触发事件 | 153 次（中位 1 次/条；8 条完全不触发） |
+| 标注帧 | 2 760（中位 20 帧/条，p90 60） |
+| 专家候选分布 | `ref` 2 463（89.2%）/ `retract` 167 / `hold` 97 / `blend` 33 |
+| `forced`（四候选全不合格，**不入库**） | 69（2.4%） |
+| 审计通过率（2 850 步） | `ref` 0.87 / `blend` 0.87 / `retract` 0.94 / `hold` 0.97 |
+| 深漂移态（pen ≥ 20.8 mm 或 tilt ≥ 30°，491 步）`ref` 通过率 | 0.75 |
+| 一步前视 Δpen 中位 | −0.09 mm（三个会动的候选）+0.01° 的 Δtilt 量级 |
+| 数据集 | 80 条 / 2 756 帧（20 条因 <4 帧被丢） |
+
+**接头接管有没有用？没有。**同一批 episode、同一 seed 的配对比较：
+
+| 臂 | 成功 | Wilson 95% |
+|---|---|---|
+| 纯基座（`rl/eval/ab_base_trainpool.json`） | 16/100 = 16.0% | [10.1%, 24.4%] |
+| 基座 + 20 步专家接管（本采集） | 14/100 = 14.0% | [8.5%, 22.1%] |
+| 配对 McNemar（同一批 episode） | 救回 9 / 害死 11 | **p = 0.824** |
+
+也就是说：**专家接管既没救回来，也没搞坏**。这是可预期的 —— 接管只持续 20 步就交还 ACT，
+而 ACT 会继续往同一个方向漂；药盒一旦已经歪到 30° 以上，20 步内也救不回来。
+所以这一步的交付物是**标签**，不是"接管后的成功率"。
+
+### 12.4.1 第 1 轮发现的问题：`tilt > 25°` 在搬运段是**正常行为**
+
+按母本相位统计 2 850 个标注步的位置：`transport` 915 / `settle_a` 733 / `grasp` 476 /
+`settle_b` 444 / `lift` 209 / 其它 93 —— **接近一半的标注落在搬运段**。
+而 `so-arm101-sim` 技能 §6 的实测结论是：搬运途中盒体本来就会歪 27~30°
+（lift/elbow/flex 三轴平行，工具俯仰随 TCP 高度线性变化 0.22°/mm），
+所以"tilt > 25°"在 transport 段是**物理必然，不是失败**。
+
+第 1 轮的数据因此一半是在标"正常搬运"。修正：触发器叠加**母本相位门控**
+（`--phase-gate`，默认开；允许 `approach,descend,grasp,settle_a,lift,settle_b`）。
+第 2 轮（`dagger_v2`，母本池 `0-99,130-179`，避开 held-out 100-129）标注步的相位分布变为
+`settle_a` 71 / `settle_b` 26 / `transport` 16 / `grasp` 10（前 123 步抽样），搬运段降到 13%
+（剩下的 13% 是"窗口溢出"：窗口开始后 20 步里相位自然推进到 transport）。
+
+### 12.4.2 顺手证实的一件事：`sim156` 的训练 episode 与 `scripts/` **不是同一批**
+
+这件事必须钉住，否则 §5/§10 的 "held-out" 说法站不住。做法：取 `sim156` 每条 episode 第 150 帧的
+`observation.state`，与 `scripts/ep_000000..000399` 第 150 帧的 `qpos[:6]`（转成度）逐条比：
+
+```
+每条 sim156 episode 到最近母本 episode 的最小 maxdiff：中位 21.80°，最小 20.26°，
+maxdiff < 1° 的条数 0/156
+```
+
+首帧比不出来（所有 episode 的起始姿态都是 oldros 的 0/−100/88.3/70.7/−103.5，`maxdiff=0.000`），
+必须比中途帧。结论：`sim156` 与 `scripts/` 是两批不同的出生随机化 → 在 `scripts/100-129` 上的评测
+**确实是分布外泛化**，也解释了基座成功率只有 16~27%、每条都压盒 10~22 mm。
+
+### 12.4.3 数据集口径核对
+
+| 项 | 纠正集 (`dagger_v1`) | 母本 (`sim156`) |
+|---|---|---|
+| 帧数 | 2 756（80 条） | 70 824（156 条） |
+| 相机 env 均值 | 142.4 | 125.5 |
+| 相机 wrist 均值 | 142.4 | 141.6 |
+| 相邻帧 \|Δaction\| 中位 / p90 | 0.00° / 0.66° | 0.28° / 0.71° |
+
+图像走 `ObsAdapter`（含 SensorModel），与母本同口径；动作平滑度与母本同量级 —— 说明纠正帧
+不是"跳变标签"。
+
+### 12.4.4 混合数据集
+
+`rl/mix_dataset.py` 把纠正集重复 `--repeat 3` 后与母本 aggregate：
+
+```
+纠正帧 2 756 × 3 = 8 268  +  母本 70 824  =  79 092 帧（396 条 episode）
+纠正帧占比 10.45%
+```
+
+★ 这里踩了一个坑并且修好了：lerobot 的 `aggregate_datasets` 是 **packet 直通 remux，不重编码**
+（`video_utils.concatenate_video_files`），两个来源 codec 不同（母本 av1/crf30/preset12，
+纠正集 h264/crf23）时要么兼容性检查直接报错、要么拼出来的流是坏的。`mix_dataset.py` 因此会先把
+纠正集的视频**真重编码**成母本的编码参数（ffmpeg + libsvtav1，2 个文件 6 s），再 aggregate。
+
+### 12.4.5 第 2 轮：阶段门控版（这就是交给第 3 轮的正式数据集）
+
+母本池 `scripts/0-99,130-179`（150 条，**避开 held-out 100-129**），其余设置同第 1 轮：
+
+| 量 | 第 1 轮（无门控，`dagger_v1`） | 第 2 轮（相位门控，`dagger_v2`） |
+|---|---|---|
+| 母本 episode 数 | 100 | 150 |
+| 触发事件 | 153 | 179 |
+| 标注帧 | 2 760 | 3 134 |
+| 数据集 episode / 帧 | 80 / 2 756 | 108 / 3 124 |
+| 标注步落在 transport 的比例 | 32.1% | **11.4%**（窗口溢出，不是进场） |
+| 标注步相位构成 | transport 915 / settle_a 733 / grasp 476 / settle_b 444 / lift 209 / 其它 93 | settle_a 1 004 / grasp 821 / settle_b 689 / transport 368 / lift 269 / descend 67 |
+| 候选分布 | ref 89.2% / retract 6.1% / hold 3.5% / blend 1.2% | **ref 92.6%** / retract 4.2% / hold 2.0% / blend 1.2% |
+| `forced`（丢弃） | 69（2.4%） | 84（2.6%） |
+| 审计通过率 `ref`（全部 / 深漂移态） | 0.87 / 0.75 | **0.92 / 0.73** |
+| 一步前视 Δpen 中位（`ref`） | −0.09 mm | −0.12 mm |
+| 含接管的成功率 | 14/100 = 14.0% | 19/150 = 12.7% |
+
+第 2 轮的**进场状态**（215 个窗口的首步，这是真正落在 ACT 漂移分布上的帧）：
+
+```
+pen  p50 14.2 mm / p90 15.2 mm      ← pen 触发器在 ~14 mm 处进场，符合定标
+tilt p50 13.7° / p90 28.3°          ← 主要是穿透触发，不是倾角触发
+lift p50 0.0 mm                     ← 进场时药盒还没被抬起来（抓取/贴合阶段）
+进场相位: grasp 59 / settle_a 53 / settle_b 45 / lift 42 / descend 16
+```
+
+配对比较（同一批 150 条、同一 seed）：
+
+| 臂 | 成功 | Wilson 95% |
+|---|---|---|
+| 纯基座（`ab_base_trainpool.json` + `ab_base_pool130.json`） | 26/150 = 17.3% | [12.1%, 24.2%] |
+| 基座 + 20 步专家接管 | 19/150 = 12.7% | [8.3%, 18.9%] |
+| 配对 McNemar | 救回 12 / 害死 19 | p = 0.281 |
+
+**结论（必须原样引用）**：专家接管**没有**改善 episode 成功率，点估计还略差（19 vs 26，p = 0.28，
+不显著）。所以这套数据的价值只能来自"标签本身"，不能拿"接管后成功率"当卖点。
+第 3 步（微调 ACT）是否真的有用，必须用 held-out 100-129 的成功率来讲，而不是用这里的数字。
+
+混好的数据集（`rl/dagger_ds/sim156_plus_dagger3`）：
+
+```
+母本 70 824 帧（156 条） + 纠正 3 124 × 3 = 9 372 帧  =  80 196 帧 / 480 条
+纠正帧占比 11.7%
+```
+
+
+
+### 12.5 这一步的局限（必须在报告里说清）
+
+1. **标签是"不恶化"不是"最优"**：前视 1 步只能证明"这一步不会更糟"，不能证明"这是恢复动作"。
+   理论上应该前视到 episode 终止（等于做 MPC），本步骤没做。
+2. **候选优先级天然偏向不动**：通过率顺序 `hold` 0.97 > `retract` 0.96 > `ref` 0.92，也就是说
+   "冻结"永远是最安全的候选。本实现把 `ref` 排在第一位（而不是按通过率排序），是刻意的设计选择：
+   我们要的是"专家在这个状态下会做什么"，不是"什么动作最不会被判违规"。`hold` 实际占比只有
+   2.0%（第 1 轮 3.5%），没有把纠正集稀释成"别动"。
+3. **只有窗口首帧落在 ACT 的真实状态分布上**：窗口内状态由专家驱动，后续帧接近母本分布
+   （这部分价值等于把母本数据"续"到漂移点之后）。
+4. **`forced` 帧被丢弃**，因此窗口不连续 —— ACT 的 chunk 预测需要时序连续性，这是有代价的。
+5. **混比是超参**：纠正帧 vs 母本 70 824 帧的比例决定了它有多少影响力。本报告只如实记录数字
+   （×3 = 11.7%），不做"调到一个好看的成功率"的调参。
+6. **触发器的语义依赖母本相位**：相位门控用的是母本 `phase[k]` 这个"时间对齐"的近似；
+   专家接管后 ACT/专家可能已经不在那个相位了。窗口溢出到 transport 的 11.4% 就是这个近似的代价。
+
+---
+
+## 13. 第 3 步：微调 ACT 的配方（需要 GPU，命令可直接粘）
+
+> 采集与混合都已经在沙箱里跑完了，**只剩微调这一步必须用有 GPU 的终端**（沙箱看不到
+> `/dev/nvidia*`，lerobot 会自己降级到 CPU，`act` 在 CPU 上训 80 k 帧不现实）。
+
+### 13.1 微调
+
+```bash
+/home/yyl/miniforge3/envs/lerobot312/bin/lerobot-train \
+  --dataset.repo_id=local/sim156_plus_dagger3 \
+  --dataset.root=/home/yyl/deepseek-harness/rl/dagger_ds/sim156_plus_dagger3 \
+  --policy.type=act \
+  --policy.pretrained_path=/home/yyl/lerobot/outputs/train/act_sim156_pre/checkpoints/last/pretrained_model \
+  --batch_size=8 --steps=10000 --save_freq=2500 \
+  --output_dir=/home/yyl/lerobot/outputs/train/act_dagger_ft \
+  --seed=1000 --num_workers=4
+```
+
+- `--steps=10000` ≈ 1 个 epoch（80 196 帧 / batch 8 = 10 025 步/epoch）。当初 `sim156` 训了
+  17 700 步（≈2 epoch）。**建议先跑到 10 000 停**：纠正帧只占 11.7%，跑太多容易把母本能力冲掉；
+  跑完不满意再 `--resume` 续到 20 000。
+- 第一次跑先 `--steps=200` 试通，看日志里的 `s/step` 估总时长，再决定要不要减步数。
+- 注意本机 lerobot 的选项名是 `--policy.pretrained_path`（没有 `--policy.path`）。
+
+### 13.2 评测（沙箱 CPU 也能跑，30 条约 3~5 min）
+
+```bash
+cd /home/yyl/deepseek-harness
+env -u PYTHONHOME -u PYTHONPATH MUJOCO_GL=egl LP_NUM_THREADS=8 \
+    .venv-rl/bin/python rl/eval_ab.py \
+    --base /home/yyl/lerobot/outputs/train/act_dagger_ft/checkpoints/last/pretrained_model \
+    --episodes 100-129 --seeds 1 --judge strict \
+    --skip-base --base-from rl/eval/ab_base_heldout_strict.json \
+    --out rl/eval/ab_dagger_ft.json
+```
+
+- `--base` 可以传路径（`base_policy.make_base` 里 `CKPTS.get(name, name)`，不认识的名字就当路径）。
+- `--skip-base --base-from rl/eval/ab_base_heldout_strict.json` 复用母本基座的 30 条结果
+  （base 对固定 seed 是确定性的：8/30 = 26.7%），只跑新臂，省一半时间。
+- **判据不是"成功率变高了"**：要用同一批 episode 的配对 McNemar + `clean_success` 审计
+  （`rl/audit_hack.py`），因为 §5 已经证明"成功率"可以被"撞翻早退"刷出来。
+
+### 13.3 如果第 3 步也证明不了效果
+
+那就把结论按"负结果"写死：ACT 基座在 `scripts/` 这批分布外出生随机化上的失败模式，
+不是"缺一点在线微调"能修好的（§5/§10/§12 三条独立证据：残差无上界空间、三版奖励全无效、
+20 步专家接管反而 19 vs 26）。下一步应该换结构而不是换超参：
+
+- **B1 任务空间残差**（`ik/test_ik.py` 的 `solve_ik_to_xyz` 已可用）：残差改成 Δxyz + Δyaw，
+  直接作用在 TCP 上，而不是 6 个关节各自抖 —— 这是 §10 的结论指向的方向；
+- **B2 chunk 级残差**：ACT 每 100 步才重推理，关节级逐步残差和 chunk 语义不匹配；
+- **B7 修基座 → 换数据**：`so-arm101-sim` 的脚本专家能做出 122 mm 抬升、压盒 0.39 mm 的轨迹，
+  用它的**出生随机化分布**（而不是 `scripts/` 的）重新生成训练集，可能比 DAgger 更直接。
