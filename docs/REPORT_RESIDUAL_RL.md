@@ -665,3 +665,79 @@ tensors 234 个，完全相同 81 个，有差异 153 个；
 `rl/eval/ab_base_heldout_strict.json` 是 **`--seeds 1`** 跑的（8/30 = 26.7%，我重跑复现无误）。
 而 `--seeds 3` 的基座是 **12/90 = 13.3%** —— seed 1/2 比 seed 0 苛刻得多（30 次里只成功 4 次）。
 所以"基座 26.7%"只是 seed 0 一个 slice 的数字，**不能当作 90 次评测的基座水平引用**。
+
+---
+
+## 15. 第 3 步实跑：微调 ACT（**负结果**，seed 1000 已走完，1001/1002 在跑）
+
+### 15.1 训练配置（与既定命令逐项一致，未临时改任何参数）
+
+```
+数据集   : rl/dagger_ds/sim156_plus_dagger3（480 条 / 80 196 帧，纠正帧 11.7%）
+基座     : act_sim156_pre（--policy.pretrained_path）
+batch 8 / lr 1e-05（ACT 预设）/ steps 10 000 / save_freq 2 500 / seed 1000
+硬件     : RTX 4060 Laptop，0.39 s/step，**59 min 57 s 跑完 10 000 步**
+```
+
+评测：`rl/ft_eval_sweep.py`，每个 ckpt 在 held-out 100-129 上跑 `--seeds 3` = **90 次 rollout**，
+按 (episode, seed) 与基座配对；主指标 `clean_success`。
+
+### 15.2 seed 1000 的曲线：clean 成功率**一路往下**
+
+| ckpt | success | clean success | clean 率 | 配对（修好/弄坏） | McNemar p |
+|---|---|---|---|---|---|
+| 基座 sim156 | 12/90 = 13.3% | 10/90 | **11.1%** | — | — |
+| 2 500 步 | 12/90 | 8/90 | 8.9% | 4 / 6 | 0.75 |
+| 5 000 步 | 10/90 | 9/90 | 10.0% | 2 / 3 | 1.00 |
+| 7 500 步 | **5/90** | **4/90** | **4.4%** | 0 / 6 | **0.031** |
+| 10 000 步 | 8/90 | 5/90 | 5.6% | 2 / 7 | 0.18 |
+
+读懂这张表的关键是"配对"那两列：
+
+- **7 500 步**：基座原本干净的 6 条被弄坏，**一条也没修好**（p = 0.031，统计上显著变差）；
+- **10 000 步**：基座 10 条干净成功里只剩 **3 条**，坏了 7 条，新修好 2 条；
+- `success` 同步下滑（13.3% → 8.9% → 5.6%），不是只有 clean 口径变差。
+
+图：`rl/curves/ft_clean_vs_steps.png`；明细：`rl/eval/ft/s1000_{2500,5000,7500,10000}.json`、
+汇总 `rl/eval/ft_sweep.json`。
+
+### 15.3 判定（按 §13.3 事先写死的判据，不事后改）
+
+判据是"每个 seed 的 clean 配对 McNemar p < 0.05 **且** 率高于基座"。实测是**反方向**：
+率低于基座且 7 500 步显著变差。→ **这条配方（11.7% 纠正帧 × lr 1e-5 × 1 epoch）微调无效，且有害。**
+与 §14 的噪声地板不同，这里不是"随机彩票"：曲线**随步数单调恶化**，而彩票不会跟步数相关。
+
+### 15.4 为什么会这样（三个可检验的假设）
+
+1. **标签在漂移状态上是错的**：`ref` 是母本轨迹**同相位**的动作，但状态已经漂了；§12 的审计只
+   保证"这一步不会让物理恶化"，不保证"这是恢复动作"。把这些当监督信号，等于教 ACT
+   "在看起来要失败的时候，照原计划继续走"。
+2. **纠正帧把模型推离正常轨迹**：9 372 帧（×3 重复）全部集中在"抓歪了"的观测上，
+   而母本的正常轨迹只有 70 824 帧。重复 3 倍相当于给这类观测加权，可能直接把
+   "接近-对中"的行为冲掉。
+3. **10 000 步 × lr 1e-5 已经足够让模型离开基座**（对比 §14 里 3 步几乎没动权重）。
+
+### 15.5 接着必须做的关键控制（1 小时能跑完，能一刀切开假设 2 和 3）
+
+**同一条命令、同样的 10 000 步，把数据集换成纯 `sim156`（去掉纠正帧）**：
+
+```bash
+# 控制臂：纯母本 10k 步（区别只有"有没有纠正帧"）
+/home/yyl/miniforge3/envs/lerobot312/bin/lerobot-train \
+  --dataset.repo_id=local/sim156 --dataset.root=/home/yyl/lerobot_datasets/sim156 \
+  --policy.type=act --policy.repo_id=local/act_sim156_ft10000 \
+  --policy.pretrained_path=/home/yyl/lerobot/outputs/train/act_sim156_pre/checkpoints/last/pretrained_model \
+  --policy.push_to_hub=false --save_checkpoint_to_hub=false \
+  --batch_size=8 --steps=10000 --save_freq=2500 \
+  --output_dir=/home/yyl/lerobot/outputs/train/act_sim156_ft10000 --seed=1000 --num_workers=4
+```
+
+- 若控制臂也掉到 ~5/90 → **问题在"训久了"**（lr/步数/遗忘），纠正数据无罪；
+- 若控制臂守住 ~10/90 而微调臂掉到 5/90 → **纠正数据有害**，要改的是标签（比如只保留
+  `ref` 通过审计**且**相位是 `descend/grasp` 的帧，或者换成"发现漂移就把 TCP 退回 10 mm"的
+  安全标签）。
+
+### 15.6 还没跑完的部分
+
+`seed 1001` / `1002` 在同一条循环里排队（各约 60 min），结果会自动落到
+`rl/eval/ft/s{1001,1002}_*.json`，`rl/ft_eval_sweep.py --aggregate-only` 一跑就出三 seed 的均值/区间。
