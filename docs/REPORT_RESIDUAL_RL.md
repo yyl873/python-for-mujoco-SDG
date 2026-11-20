@@ -479,7 +479,7 @@ maxdiff < 1° 的条数 0/156
 | 数据集 episode / 帧 | 80 / 2 756 | 108 / 3 124 |
 | 标注步落在 transport 的比例 | 32.1% | **11.4%**（窗口溢出，不是进场） |
 | 标注步相位构成 | transport 915 / settle_a 733 / grasp 476 / settle_b 444 / lift 209 / 其它 93 | settle_a 1 004 / grasp 821 / settle_b 689 / transport 368 / lift 269 / descend 67 |
-| 候选分布 | ref 89.2% / retract 6.1% / hold 3.5% / blend 1.2% | **ref 92.6%** / retract 4.2% / hold 2.0% / blend 1.2% |
+| 候选分布 | ref 89.2% / retract 6.1% / hold 3.5% / blend 1.2% | **ref 92.6%** / retract 4.3% / hold 2.0% / blend 1.2% |
 | `forced`（丢弃） | 69（2.4%） | 84（2.6%） |
 | 审计通过率 `ref`（全部 / 深漂移态） | 0.87 / 0.75 | **0.92 / 0.73** |
 | 一步前视 Δpen 中位（`ref`） | −0.09 mm | −0.12 mm |
