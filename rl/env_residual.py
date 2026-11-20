@@ -65,7 +65,8 @@ class ResidualSO101(gym.Env):
                  control_hz: float = 30.0, max_seconds: float = 15.0,
                  episode_pool=(0,), scripts=None, randomize: bool = True,
                  residual_deg: float = RESIDUAL_DEG, seed: int = 0,
-                 width: int = 640, height: int = 480):
+                 width: int = 640, height: int = 480,
+                 reward_version: str = "v1", judge: str = "legacy"):
         super().__init__()
         import mujoco                                    # noqa: PLC0415
         import test_render as R                          # noqa: PLC0415
@@ -87,6 +88,16 @@ class ResidualSO101(gym.Env):
         self.episode_pool = list(episode_pool)
 
         self.residual_deg = float(residual_deg)
+        # ---- 奖励与判定版本（2026-11-20 第二批）----
+        # reward_version: "v1" = spec §6.2 原表（绝对距离）；"v2" = 抗作弊版（进展差分 + 洁净项）
+        # judge: "legacy" = 旧的成功/失败判定（峰值抬升 / 只看倾角）；
+        #        "strict" = 连续 5 步洁净成功 + 掉桌/出区判失败（罚 -30），用于堵住"撞翻早退"作弊
+        assert reward_version in ("v1", "v2"), reward_version
+        assert judge in ("legacy", "strict"), judge
+        self.reward_version = reward_version
+        self.judge = judge
+        self._prev_dist = 0.0
+        self._lift_streak = 0
         self.action_space = spaces.Box(low=-self.residual_deg, high=self.residual_deg,
                                        shape=(6,), dtype=np.float32)
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf,
@@ -144,18 +155,46 @@ class ResidualSO101(gym.Env):
         z = self.d.xmat[self.arm.obj].reshape(3, 3)[2, 2]
         return float(np.degrees(np.arccos(np.clip(z, -1.0, 1.0))))
 
-    def _reward(self, lift_mm: float, n_con: int, pen_mm: float):
+    def _reward(self, lift_mm: float, n_con: int, pen_mm: float, tilt: float, a):
+        """返回 (reward, 分项字典)。分项字典进 info["reward_split"]，用于事后证明奖励没被 hack。
+
+        v1 = spec §6.2 原表：绝对距离 −10·d。缺点见 docs/REPORT_RESIDUAL_RL.md §6：
+          ① 盒边悬停就能稳定得分（贴近但不抓是局部最优）
+          ② 成功 +50 被每集约 −220 的稠密项淹没
+          ③ 没有动作惩罚 → 策略贴动作上限抖
+
+        v2（抗作弊版）：
+          ① 进展差分 200·(d_prev − d_now)：势函数，整集上限 ≈ 200×初始距离(≈0.1 m)=20，无法无限刷分
+             —— 穿透（pen>0.5 mm）时置 0：把手指捅进盒子不算"靠近"
+          ② 抓取项加洁净条件（pen≤0.5、tilt≤15°）：防止"斜着蹭一下算抓住"
+          ③ 抬升项 tanh(Δpeak/0.02)：2 cm 就饱和，比 v1 的 5 cm 更早起效
+          ④ 穿模罚 −3（v1 是 −1）：让"穿模假抓"比真抓贵
+          ⑤ 残差幅度罚 −0.02‖a‖：抑制贴饱和（spec 早期版本有，posttrain 表里漏了）
+        """
         tcp = self.arm.tcp_pos()
         box = self.arm.obj_pos()
         dist = float(np.linalg.norm(tcp - box))
-        r = -10.0 * dist
-        if n_con >= 2 and lift_mm > 5.0:
-            r += 0.5
         rise = max(0.0, lift_mm - self._max_lift)
-        r += 2.0 * float(np.tanh(rise / 50.0))
-        if pen_mm > 0.5:
-            r -= 1.0
-        return r
+        split = {}
+
+        if self.reward_version == "v1":
+            split["progress"] = -10.0 * dist
+            split["grasp"] = 0.5 if (n_con >= 2 and lift_mm > 5.0) else 0.0
+            split["lift"] = 2.0 * float(np.tanh(rise / 50.0))   # rise 单位 mm
+            split["pen"] = -1.0 if pen_mm > 0.5 else 0.0
+            split["act"] = 0.0
+        else:                                            # v2
+            clean = (n_con >= 2 and lift_mm > 5.0 and pen_mm <= 0.5 and tilt <= 15.0)
+            split["progress"] = (0.0 if pen_mm > 0.5
+                                 else 200.0 * (self._prev_dist - dist))
+            split["grasp"] = 0.5 if clean else 0.0
+            split["lift"] = 3.0 * float(np.tanh(rise / 20.0))   # rise 单位 mm，2 cm 饱和
+            split["pen"] = -3.0 if pen_mm > 0.5 else 0.0
+            split["act"] = -0.02 * float(np.linalg.norm(np.asarray(a, float)))
+
+        r = float(sum(split.values()))
+        split["total"] = round(r, 6)
+        return r, split
 
     # ---------------- Gym 接口 ----------------
     def reset(self, *, seed=None, options=None):
@@ -202,6 +241,8 @@ class ResidualSO101(gym.Env):
         self._t0 = float(d.time)
         self._max_lift = -1e9
         self._tcp_box_min = 1e9
+        self._prev_dist = float(np.linalg.norm(self.arm.tcp_pos() - self._obj0))
+        self._lift_streak = 0
         return self._obs(), dict(episode_id=eid, task=self._task)
 
     def step(self, action):
@@ -237,22 +278,55 @@ class ResidualSO101(gym.Env):
         tilt = self._box_tilt_deg()
         self._tcp_box_min = min(self._tcp_box_min, float(np.linalg.norm(self.arm.tcp_pos() - obj)))
 
-        reward = self._reward(lift_mm, n_con, pen_mm)   # ★ 必须在更新 _max_lift 之前算（rise 依赖旧值）
+        # ★ 奖励必须在更新 _max_lift / _prev_dist 之前算（rise 依赖旧峰值，进展依赖旧距离）
+        reward, rsplit = self._reward(lift_mm, n_con, pen_mm, tilt, a)
         self._max_lift = max(self._max_lift, lift_mm)
-        success = bool(self._max_lift >= 50.0 and n_con >= 2)
+        self._prev_dist = float(np.linalg.norm(self.arm.tcp_pos() - obj))
+
+        # 洁净判据：抬升够 + 两指接触 + 没歪盒。
+        # ★ 2026-11-20 修正：**不能**把 pen≤0.5 mm 写进成功判据 —— 那是脚本专家的 G2 口径，
+        #   而 ACT 基座自己在 110 条 episode 上的压盒中位数是 14.2 mm、p90 20.8 mm，
+        #   加上 0.5 mm 门槛等于让任务数学上不可达（实测训练期成功率恒为 0，是判据造出来的，
+        #   不是策略差）。穿透改为 ①奖励里的惩罚项 ②审计指标（门槛取基座 p90）。
+        clean = bool(lift_mm >= 50.0 and n_con >= 2 and tilt <= 15.0)
         fell = bool(tilt > 45.0)
-        if success:
-            reward += 50.0
-        if fell:
-            reward -= 10.0
-        terminated = bool(success or fell)
-        timeout = (d.time - self._t0) >= self.max_seconds
-        out_of_area = hdisp_mm > 120.0
-        truncated = bool(timeout or out_of_area)
+        off_table = bool((obj[2] - self._obj0[2]) < -0.02)      # 掉下桌（旧判定漏了这条）
+        out_of_area = bool(hdisp_mm > 120.0)                    # 推出工作区（旧判定当零惩罚截断）
+        timeout = bool((d.time - self._t0) >= self.max_seconds)
+
+        if self.judge == "strict":
+            # 成功必须"连续 5 个控制步（0.17 s）都洁净"，不接受单帧峰值
+            self._lift_streak = self._lift_streak + 1 if clean else 0
+            success = bool(self._lift_streak >= 5)
+            fail = bool(fell or off_table or out_of_area)
+            if success:
+                reward += 50.0
+            if fail:
+                reward -= 30.0                                  # > v2 进展项整集上限(20)，堵住"撞翻早退"
+            terminated = bool(success or fail)
+            truncated = bool(timeout and not terminated)
+        else:                                                   # legacy：复现旧结论用
+            success = bool(self._max_lift >= 50.0 and n_con >= 2)
+            fail = bool(fell)
+            if success:
+                reward += 50.0
+            if fell:
+                reward -= 10.0
+            terminated = bool(success or fell)
+            truncated = bool(timeout or out_of_area)
+
+        rsplit["success"] = 50.0 if success else 0.0
+        rsplit["fail"] = (-30.0 if (self.judge == "strict" and fail) else
+                          (-10.0 if (self.judge != "strict" and fail) else 0.0))
+        rsplit["total"] = round(float(reward), 6)
 
         info = dict(lift_mm=lift_mm, max_lift_mm=float(self._max_lift),
                     hdisp_mm=hdisp_mm, contact_n=n_con, penetration_mm=pen_mm,
                     box_tilt_deg=tilt, success=success, episode_id=self._episode_id,
+                    lift_streak=self._lift_streak, clean=clean,
+                    fell=fell, off_table=off_table, out_of_area=out_of_area,
+                    judge=self.judge, reward_version=self.reward_version,
+                    reward_split=rsplit,
                     act_il_deg=action_il.tolist(), act_res_deg=a.tolist())
         return self._obs(), float(reward), terminated, truncated, info
 
@@ -276,17 +350,25 @@ def _selftest(argv=None) -> int:
     ap.add_argument("--episodes", default="0")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--no-randomize", action="store_true")
+    ap.add_argument("--reward", default="v1", choices=["v1", "v2"])
+    ap.add_argument("--judge", default="legacy", choices=["legacy", "strict"])
+    ap.add_argument("--split", action="store_true", help="逐步打印奖励分项（调试用）")
     a = ap.parse_args(argv)
     pool = tuple(int(x) for x in a.episodes.split(",") if x.strip())
     env = ResidualSO101(base_name=a.base, device=a.device, episode_pool=pool,
-                        randomize=not a.no_randomize)
+                        randomize=not a.no_randomize,
+                        reward_version=a.reward, judge=a.judge)
     try:
         obs, info = env.reset(seed=0)
         assert obs.shape == (OBS_DIM,), obs.shape
         n_term = n_trunc = 0
         r_sum = 0.0
+        agg = {}
         for _ in range(a.steps):
             obs, r, term, trunc, info = env.step(env.action_space.sample())
+            for k, v in (info.get("reward_split") or {}).items():
+                if k != "total":
+                    agg[k] = agg.get(k, 0.0) + float(v)
             r_sum += r
             n_term += int(term)
             n_trunc += int(trunc)
@@ -294,6 +376,16 @@ def _selftest(argv=None) -> int:
                 obs, info = env.reset()
         # 200 步 @30 Hz 只有 6.7 s，够不到 15 s 的超时截断，所以单开一段把 truncated
         # 分支也走通：同一环境实例把 max_seconds 缩到 2 s（不重载 ACT，省 20 s）。
+        # 强制走一次失败路径（掉桌），验证 strict 判定的 fail 分支真的接通
+        # （随机动作 200 步里几乎不会自己撞翻，不能靠运气）
+        env.reset(seed=2)
+        env.d.qpos[env.arm.oadr + 2] -= 0.10
+        env._mujoco.mj_forward(env.m, env.d)
+        obs, r, term, trunc, info = env.step(np.zeros(6, dtype=np.float64))
+        if term and info.get("off_table"):
+            n_term += 1
+            print("  fail 通路自检：掉桌 → terminated ok")
+
         env.max_seconds = 2.0
         obs, info = env.reset(seed=1)
         for _ in range(4 * int(round(2.0 * env.control_hz)) + 40):
@@ -306,6 +398,9 @@ def _selftest(argv=None) -> int:
                 obs, info = env.reset()
         dims_ok = bool(obs.shape == (OBS_DIM,) and env.action_space.shape == (6,))
         covered = bool(n_term >= 1 and n_trunc >= 1)          # spec §9 S1 硬判据
+        tot = sum(abs(v) for v in agg.values()) or 1.0
+        print("  奖励分项占比：" + "  ".join(
+            f"{k}={v:.1f}({abs(v)/tot*100:.0f}%)" for k, v in sorted(agg.items())))
         print(f"{'ok' if (dims_ok and covered) else 'FAIL'} steps={a.steps} "
               f"obs_dim={obs.shape[0]} act_dim={env.action_space.shape[0]} "
               f"reward_sum={r_sum:.2f} n_terminated={n_term} n_truncated={n_trunc} "

@@ -41,7 +41,9 @@ def main(argv=None) -> int:
     ap.add_argument("--steps", type=int, default=30000)
     ap.add_argument("--base", default="sim156",
                     help="lance/armA/armB/sim156（S0 pilot 结论：sim156 是唯一闭环成功的基座，故设默认）")
-    ap.add_argument("--episodes", default="0-5", help="训练用母本编号池")
+    ap.add_argument("--episodes", default="0-49", help="训练用母本编号池"
+                    "（★ 2026-11-20 改进：默认 0-49，评测必须用 held-out 100-129，"
+                    "  否则训练见过的 episode 会污染 A/B 结论）")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--swap-cams", action="store_true")
     ap.add_argument("--no-sensor", action="store_true")
@@ -50,13 +52,20 @@ def main(argv=None) -> int:
     ap.add_argument("--batch-size", type=int, default=256)
     ap.add_argument("--ckpt-dir", default=str(ROOT / "rl" / "ckpt"))
     ap.add_argument("--curve-dir", default=str(ROOT / "rl" / "curves"))
+    ap.add_argument("--residual-deg", type=float, default=None,
+                    help="残差动作空间上限（度）；默认按 env 的 RESIDUAL_DEG(5.73°)，"
+                         "幅度扫描后建议改成平台值（例如 1.43）")
+    ap.add_argument("--reward", default="v1", choices=["v1", "v2"],
+                    help="奖励版本：v1=spec §6.2 原表；v2=抗作弊版（进展差分等）")
+    ap.add_argument("--judge", default="legacy", choices=["legacy", "strict"],
+                    help="成败判定：legacy=旧（峰值抬升/只看倾角）；strict=连续5步洁净成功+掉桌判失败")
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--log-every", type=int, default=1000)
     a = ap.parse_args(argv)
 
     from stable_baselines3 import SAC                            # noqa: PLC0415
     from stable_baselines3.common.callbacks import BaseCallback   # noqa: PLC0415
-    from env_residual import ResidualSO101                        # noqa: PLC0415
+    from env_residual import ResidualSO101, RESIDUAL_DEG          # noqa: PLC0415
 
     pool = []
     for part in a.episodes.split(","):
@@ -100,7 +109,10 @@ def main(argv=None) -> int:
     for seed in [int(s) for s in a.seeds.split(",") if s.strip()]:
         env = ResidualSO101(base_name=a.base, device=a.device, episode_pool=tuple(pool),
                             swap_cams=a.swap_cams, use_sensor=not a.no_sensor,
-                            max_seconds=a.max_seconds, seed=seed)
+                            max_seconds=a.max_seconds, seed=seed,
+                            residual_deg=(RESIDUAL_DEG if a.residual_deg is None
+                                          else float(a.residual_deg)),
+                            reward_version=a.reward, judge=a.judge)
         model_path = ck_dir / f"s{seed}" / "model.zip"
         curve = cv_dir / f"s{seed}.jsonl"
         model_path.parent.mkdir(parents=True, exist_ok=True)
@@ -118,7 +130,9 @@ def main(argv=None) -> int:
                 curve.unlink()
         remain = max(0, a.steps - done_steps)
         t0 = time.time()
-        print(f"[s{seed}] base={a.base} 已有 {done_steps} 步，本次再跑 {remain} 步", flush=True)
+        print(f"[s{seed}] base={a.base} 残差±{env.residual_deg:.2f}° reward={a.reward} "
+              f"judge={a.judge} 母本池 {len(pool)} 条 已有 {done_steps} 步，本次再跑 {remain} 步",
+              flush=True)
         if remain > 0:
             model.learn(total_timesteps=remain, callback=CurveCB(curve, a.log_every),
                         reset_num_timesteps=False, progress_bar=False)
@@ -138,6 +152,8 @@ def main(argv=None) -> int:
         head = rewards[:q]
         tail = rewards[-q:]
         rec = dict(seed=seed, base=a.base, steps=int(model.num_timesteps),
+                   residual_deg=round(float(env.residual_deg), 3), reward=a.reward, judge=a.judge,
+                   pool=f"{pool[0]}-{pool[-1]}" if pool else "",
                    n_episodes=len(rewards),
                    reward_head_mean=round(float(sum(head) / max(1, len(head))), 3),
                    reward_tail_mean=round(float(sum(tail) / max(1, len(tail))), 3),

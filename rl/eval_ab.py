@@ -79,6 +79,9 @@ def run_episode(env, policy, *, max_steps=None, video=None, fps=30, width=640, h
     pen_pre_lift = 0.0
     tilt_pre_lift = 0.0
     lift_max = 0.0
+    tilt_max = 0.0
+    streak_max = 0
+    end_reason = "unknown"
     done = False
     steps = 0
     try:
@@ -93,6 +96,8 @@ def run_episode(env, policy, *, max_steps=None, video=None, fps=30, width=640, h
             steps += 1
             pen_max = max(pen_max, info["penetration_mm"])
             lift_max = max(lift_max, info["max_lift_mm"])
+            tilt_max = max(tilt_max, float(info.get("box_tilt_deg", 0.0)))
+            streak_max = max(streak_max, int(info.get("lift_streak", 0)))
             if info["max_lift_mm"] < 5.0:            # 抬升前
                 pen_pre_lift = max(pen_pre_lift, info["penetration_mm"])
                 tilt_pre_lift = max(tilt_pre_lift, info["box_tilt_deg"])
@@ -101,15 +106,31 @@ def run_episode(env, policy, *, max_steps=None, video=None, fps=30, width=640, h
                 frame = env.rig.grab(env.d)[CAM_ENV]
                 sink.write(np.ascontiguousarray(frame[:, :, ::-1]))
             done = bool(term or trunc)
+            if done:                                  # 审计用：这一条是怎么结束的
+                if info.get("success"):
+                    end_reason = "success"
+                elif info.get("off_table"):
+                    end_reason = "off_table"
+                elif info.get("out_of_area"):
+                    end_reason = "out_of_area"
+                elif info.get("fell"):
+                    end_reason = "fell"
+                else:
+                    end_reason = "timeout"
     finally:
         if sink is not None:
             sink.release()
-    return dict(success=bool(info["success"]), steps=steps,
+    success = bool(info["success"])
+    # 洁净成功：抬升/接触/倾角/持续性都过（穿透另算，门槛取基座 p90=20.8 mm，见 rl/audit_hack.py）
+    clean_success = bool(success and tilt_max <= 15.0 and streak_max >= 5)
+    return dict(success=success, steps=steps,
                 lift_mm=round(float(lift_max), 2),
                 hdisp_mm=round(float(info["hdisp_mm"]), 2),
                 G2c_pen_pre_lift_mm=round(float(pen_pre_lift), 3),
                 G3c_tilt_pre_lift_deg=round(float(tilt_pre_lift), 2),
-                G6c_pen_max_mm=round(float(pen_max), 3))
+                G6c_pen_max_mm=round(float(pen_max), 3),
+                end_reason=end_reason, tilt_max_deg=round(float(tilt_max), 2),
+                lift_streak_max=int(streak_max), clean_success=clean_success)
 
 
 def main(argv=None) -> int:
@@ -126,8 +147,16 @@ def main(argv=None) -> int:
     ap.add_argument("--video", default=None, help="给一条 episode 录像")
     ap.add_argument("--video-tag", default="base+R", choices=["base", "base+R"],
                     help="录像录哪一臂（默认 base+R；录基座要配 --video-tag base 且不给 --policy）")
+    ap.add_argument("--judge", default="legacy", choices=["legacy", "strict"],
+                    help="成败判定口径（必须与训练时一致才可比）：legacy=旧；strict=连续5步洁净成功+掉桌判失败")
+    ap.add_argument("--reward", default="v1", choices=["v1", "v2"],
+                    help="奖励版本（只影响 env 内部回报，不影响成败判定；用于与训练配置一致）")
     ap.add_argument("--res-scale", type=float, default=1.0,
                     help="消融：残差幅度缩放（1.0=训练时的幅度；0.25/0.1 用于判断是否幅度过大）")
+    ap.add_argument("--skip-base", action="store_true",
+                    help="复用 --base-from 里的 base 臂结果（base 对固定 seed 是确定性的）")
+    ap.add_argument("--base-from", default=None,
+                    help="从该 ab_*.json 读取 base 臂行；按当前 pool 过滤后重算 Wilson")
     ap.add_argument("--resume", action="store_true",
                     help="续跑：跳过 --out 里已完成的 (tag,episode_id,seed)；mj_step 有约 7% 进程级 SIGFPE，崩了就重跑同一条命令")
     a = ap.parse_args(argv)
@@ -160,7 +189,29 @@ def main(argv=None) -> int:
             print(f"  (续跑读取失败，重头跑: {e})", flush=True)
 
     results = {}
-    for tag, policy in (("base", None), ("base+R", pol)):
+    pairs = [("base", None), ("base+R", pol)]
+    if a.skip_base and pol is not None and a.base_from:
+        prev = json.loads(Path(a.base_from).read_text(encoding="utf-8"))
+        rows = [r for r in prev["detail"]["base"]["rows"]
+                if int(r["episode_id"]) in set(pool)]
+        if not rows:
+            raise SystemExit(f"--base-from 与 --episodes 没有交集: {a.base_from}")
+        k = sum(1 for r in rows if r["success"])
+        results["base"] = dict(
+            n=len(rows), n_success=k, success_rate=wilson(k, len(rows)),
+            lift_mm_mean=round(float(np.mean([r["lift_mm"] for r in rows])), 2),
+            G2c_max=round(max(r["G2c_pen_pre_lift_mm"] for r in rows), 3),
+            G3c_max=round(max(r["G3c_tilt_pre_lift_deg"] for r in rows), 2),
+            G6c_max=round(max(r["G6c_pen_max_mm"] for r in rows), 3),
+            rows=rows, reused_from=str(a.base_from))
+        expected = len(pool) * a.seeds
+        if len(rows) != expected:
+            print(f"  ⚠️ base 复用行数 {len(rows)} != 期望 {expected}（pool×seeds）；"
+                  f"Δ 会按实际行数算，请核对 {a.base_from}", flush=True)
+        pairs = [("base+R", pol)]
+        print(f"  复用 base 臂：{len(rows)} 条（来自 {Path(a.base_from).name}）", flush=True)
+
+    for tag, policy in pairs:
         if tag == "base+R" and policy is None:
             continue
         # 续跑：先把 --out 里该臂已有的结果全部装回来（包括不在本次 pool 里的 episode），
@@ -168,7 +219,8 @@ def main(argv=None) -> int:
         rows = [done_rows[k] for k in sorted(done_rows) if k[0] == tag]
         env = ResidualSO101(base_name=a.base, device=a.device, episode_pool=tuple(pool),
                             swap_cams=a.swap_cams, use_sensor=not a.no_sensor,
-                            max_seconds=a.max_seconds)
+                            max_seconds=a.max_seconds,
+                            judge=a.judge, reward_version=a.reward)
         try:
             for eid in pool:
                 for s in range(a.seeds):
@@ -200,6 +252,7 @@ def main(argv=None) -> int:
                             rows=rows)
 
     out = dict(base=a.base, policy=a.policy, episodes=a.episodes, seeds=a.seeds,
+               judge=a.judge, reward=a.reward, base_from=a.base_from,
                res_scale=a.res_scale,
                results={k: {kk: vv for kk, vv in v.items() if kk != "rows"}
                         for k, v in results.items()},
