@@ -54,8 +54,14 @@ def wilson(k: int, n: int, z: float = 1.96):
     return (round(p, 4), round(max(0.0, centre - half), 4), round(min(1.0, centre + half), 4))
 
 
-def run_episode(env, policy, *, max_steps=None, video=None, fps=30, width=640, height=480):
-    """跑一条 episode。policy=None 表示纯基座（残差=0）。"""
+def run_episode(env, policy, *, max_steps=None, video=None, fps=30, width=640, height=480,
+                res_scale=1.0):
+    """跑一条 episode。policy=None 表示纯基座（残差=0）。
+
+    res_scale：**消融用**的残差幅度缩放。不改权重、不改动作空间，只把 SAC 输出的残差
+    乘一个系数再交给 env（env 自己还会按 ±5.73° 裁剪）。用途：判断"基座被残差打崩"
+    是因为残差**幅度太大**，还是因为策略方向本身错。
+    """
     import cv2                                                  # noqa: PLC0415
     obs, info = env.reset()
     sink = None
@@ -81,6 +87,8 @@ def run_episode(env, policy, *, max_steps=None, video=None, fps=30, width=640, h
                 act = np.zeros(env.action_space.shape, dtype=np.float32)
             else:
                 act, _ = policy.predict(obs, deterministic=True)
+                if res_scale != 1.0:                     # ★ 消融：缩放残差幅度，不碰权重
+                    act = np.asarray(act, dtype=np.float32) * float(res_scale)
             obs, r, term, trunc, info = env.step(act)
             steps += 1
             pen_max = max(pen_max, info["penetration_mm"])
@@ -115,7 +123,13 @@ def main(argv=None) -> int:
     ap.add_argument("--no-sensor", action="store_true")
     ap.add_argument("--max-seconds", type=float, default=15.0)
     ap.add_argument("--out", default=str(ROOT / "rl" / "eval" / "ab.json"))
-    ap.add_argument("--video", default=None, help="给一条 base+R 的 episode 录像")
+    ap.add_argument("--video", default=None, help="给一条 episode 录像")
+    ap.add_argument("--video-tag", default="base+R", choices=["base", "base+R"],
+                    help="录像录哪一臂（默认 base+R；录基座要配 --video-tag base 且不给 --policy）")
+    ap.add_argument("--res-scale", type=float, default=1.0,
+                    help="消融：残差幅度缩放（1.0=训练时的幅度；0.25/0.1 用于判断是否幅度过大）")
+    ap.add_argument("--resume", action="store_true",
+                    help="续跑：跳过 --out 里已完成的 (tag,episode_id,seed)；mj_step 有约 7% 进程级 SIGFPE，崩了就重跑同一条命令")
     a = ap.parse_args(argv)
 
     from env_residual import ResidualSO101                        # noqa: PLC0415
@@ -133,24 +147,41 @@ def main(argv=None) -> int:
         from stable_baselines3 import SAC                        # noqa: PLC0415
         pol = SAC.load(a.policy, device=a.device)
 
+    done_rows = {}
+    op0 = Path(a.out)
+    if a.resume and op0.exists():
+        try:
+            prev = json.loads(op0.read_text(encoding="utf-8"))
+            for tag, blk in (prev.get("detail") or {}).items():
+                for row in blk.get("rows", []):
+                    done_rows[(tag, int(row["episode_id"]), int(row["seed"]))] = row
+            print(f"  续跑：已有 {len(done_rows)} 条结果", flush=True)
+        except Exception as e:                                   # noqa: BLE001
+            print(f"  (续跑读取失败，重头跑: {e})", flush=True)
+
     results = {}
     for tag, policy in (("base", None), ("base+R", pol)):
         if tag == "base+R" and policy is None:
             continue
-        rows = []
+        # 续跑：先把 --out 里该臂已有的结果全部装回来（包括不在本次 pool 里的 episode），
+        # 否则分块跑会把之前的块丢掉。
+        rows = [done_rows[k] for k in sorted(done_rows) if k[0] == tag]
         env = ResidualSO101(base_name=a.base, device=a.device, episode_pool=tuple(pool),
                             swap_cams=a.swap_cams, use_sensor=not a.no_sensor,
                             max_seconds=a.max_seconds)
         try:
             for eid in pool:
                 for s in range(a.seeds):
+                    if (tag, int(eid), int(s)) in done_rows:
+                        rows.append(done_rows[(tag, int(eid), int(s))])
+                        continue
                     vid = None
-                    if a.video and tag == "base+R" and eid == pool[0] and s == 0:
+                    if a.video and tag == a.video_tag and eid == pool[0] and s == 0:
                         vid = a.video
                     env.episode_pool = (eid,)          # ★ 只改 pool，别动 _episodes（否则下一条 KeyError）
                     env.reset(seed=s)
                     t0 = time.time()
-                    rec = run_episode(env, policy, video=vid)
+                    rec = run_episode(env, policy, video=vid, res_scale=a.res_scale)
                     rec.update(tag=tag, episode_id=eid, seed=s, wall_s=round(time.time() - t0, 1))
                     rows.append(rec)
                     print(f"  {tag:6s} ep{eid} s{s}  {'✅' if rec['success'] else '❌'}  "
@@ -169,6 +200,7 @@ def main(argv=None) -> int:
                             rows=rows)
 
     out = dict(base=a.base, policy=a.policy, episodes=a.episodes, seeds=a.seeds,
+               res_scale=a.res_scale,
                results={k: {kk: vv for kk, vv in v.items() if kk != "rows"}
                         for k, v in results.items()},
                detail=results)

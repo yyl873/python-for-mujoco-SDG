@@ -1,0 +1,51 @@
+{
+ "policy": "rl/ckpt/s1/model.zip",
+ "base": "sim156",
+ "steps": 150,
+ "residual_limit_deg": 5.73,
+ "abs_mean_deg": 3.134,
+ "abs_p95_deg": 5.49,
+ "abs_max_deg": 5.611,
+ "saturation_frac": 0.16333333333333333,
+ "base_step_ref_deg": 1.17,
+ "per_joint": [
+  {
+   "joint": "shoulder_pan",
+   "abs_mean_deg": 1.853,
+   "abs_max_deg": 4.822,
+   "sat_frac": 0.0
+  },
+  {
+   "joint": "shoulder_lift",
+   "abs_mean_deg": 5.136,
+   "abs_max_deg": 5.611,
+   "sat_frac": 0.567
+  },
+  {
+   "joint": "elbow_flex",
+   "abs_mean_deg": 3.186,
+   "abs_max_deg": 4.874,
+   "sat_frac": 0.0
+  },
+  {
+   "joint": "wrist_flex",
+   "abs_mean_deg": 2.646,
+   "abs_max_deg": 5.605,
+   "sat_frac": 0.173
+  },
+  {
+   "joint": "wrist_roll",
+   "abs_mean_deg": 2.73,
+   "abs_max_deg": 3.84,
+   "sat_frac": 0.0
+  },
+  {
+   "joint": "gripper",
+   "abs_mean_deg": 3.252,
+   "abs_max_deg": 5.432,
+   "sat_frac": 0.24
+  }
+ ],
+ "reward_sum": -236.49,
+ "max_lift_mm": 0.11
+}
