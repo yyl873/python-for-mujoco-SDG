@@ -67,7 +67,7 @@ def main(argv=None) -> int:
     ap.add_argument("--max-seconds", type=float, default=15.0)
     ap.add_argument("--loop", action="store_true", help="跑完自动重来")
     ap.add_argument("--camera", default=None, help="env_camera / wrist_camera；不给=自由视角")
-    ap.add_argument("--device", default="cpu")
+    ap.add_argument("--device", default="auto", help="auto（有 CUDA 就用 GPU）/ cpu / cuda")
     ap.add_argument("--swap-cams", action="store_true")
     ap.add_argument("--no-sensor", action="store_true", help="关掉 SensorModel（看原始渲染）")
     a = ap.parse_args(argv)
@@ -95,7 +95,8 @@ def main(argv=None) -> int:
 
     print("=" * 70)
     print(f" view_policy  ckpt={a.ckpt}")
-    print(f" episode={a.episode}  seed={a.seed}  speed={a.speed}x  max={a.max_seconds}s")
+    print(f" episode={a.episode}  seed={a.seed}  speed={a.speed}x  max={a.max_seconds}s"
+          f"  device={env.base.policy.device}")
     print(" 关窗口或 Ctrl-C 退出；--loop 会重来")
     print("=" * 70)
 

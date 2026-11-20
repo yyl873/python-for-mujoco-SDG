@@ -47,32 +47,59 @@ CKPTS = {
 }
 
 
-def patch_lerobot_cpu_device():
-    """把 lerobot 预处理管线里写死的 device=cuda 覆盖成 cpu（仅无 GPU 时，仅本进程）。
+def resolve_device(device: str) -> str:
+    """'auto' / 'cuda'（无 CUDA 时）都归一成实际可用的设备。"""
+    import torch                                                  # noqa: PLC0415
+    if device in (None, "auto"):
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cuda" and not torch.cuda.is_available():
+        return "cpu"
+    return device
 
-    背景：checkpoint 侧 `policy_preprocessor.json` 把 `{"device": "cuda"}` 存进了管线配置，
-    没有 CUDA 的机器上 `make_pre_post_processors()` 会在 from_pretrained 里直接抛
-    `ValueError: Requested device 'cuda' but CUDA is not available`。
-    这里只在 `ProcessorPipeline._instantiate_step` 上加一层参数覆盖，**不改 lerobot 源码、
+
+def patch_lerobot_device(device: str) -> str:
+    """把 lerobot 预处理管线里存着的 device 覆盖成**这次实际用的设备**（仅本进程）。
+
+    背景（两个方向都会炸，2026-11-20 双向实测）：
+      ① checkpoint 侧 `policy_preprocessor.json` 的 `device_processor` 存的是训练时的设备，
+         本仓库几个 ckpt **全部存成 `cuda`**（连沙箱里 CPU 训出来的那个也是）。
+         在没有 CUDA 的机器上 `make_pre_post_processors()` 直接抛
+         `ValueError: Requested device 'cuda' but CUDA is not available`；
+      ② 反过来，在有 CUDA 的机器上把策略放到 cpu（`--device cpu` / `make_base` 默认就是 cpu）时，
+         管线把观测搬到 cuda:0、权重在 cpu，ACT 前向直接抛
+         `RuntimeError: Expected all tensors to be on the same device, but found at least two
+         devices, cpu and cuda:0!`（用户在有显卡的终端里跑 `rl/view_policy.py` 就是这么崩的）。
+
+    所以这里不再"只在没 GPU 时改 cpu"，而是**始终**把管线的 device 对齐到调用方真正用的设备。
+    只在 `DataProcessorPipeline._instantiate_step` 上加一层参数覆盖，**不改 lerobot 源码、
     不改 checkpoint 文件、也不改 tools/replay_policy.py**（spec 非目标 N5）。
     """
-    import torch
-    if torch.cuda.is_available():
-        return False
-    from lerobot.processor.pipeline import DataProcessorPipeline as PP
-    if getattr(PP, "_dsh_cpu_patched", False):
-        return True
-    orig = PP._instantiate_step.__func__
+    target = resolve_device(device)
+    from lerobot.processor.pipeline import DataProcessorPipeline as PP   # noqa: PLC0415
+    if getattr(PP, "_dsh_dev_patched", None) == target:
+        return target
+    if not hasattr(PP, "_dsh_dev_orig"):            # 只保存一次原始实现，避免重复包裹
+        PP._dsh_dev_orig = PP._instantiate_step.__func__
+    orig = PP._dsh_dev_orig
 
     def _instantiate_step(cls, step_entry, step_class, step_key, overrides):
         if isinstance(step_entry, dict):
             cfg = step_entry.get("config")
-            if isinstance(cfg, dict) and cfg.get("device") not in (None, "cpu"):
-                step_entry = {**step_entry, "config": {**cfg, "device": "cpu"}}
+            if isinstance(cfg, dict) and "device" in cfg and cfg.get("device") != target:
+                step_entry = {**step_entry, "config": {**cfg, "device": target}}
         return orig(cls, step_entry, step_class, step_key, overrides)
 
     PP._instantiate_step = classmethod(_instantiate_step)
-    PP._dsh_cpu_patched = True
+    PP._dsh_dev_patched = target
+    return target
+
+
+def patch_lerobot_cpu_device():
+    """向后兼容的名字（旧调用点）：等价于 patch_lerobot_device('cpu') 的"无 GPU 才改"语义。"""
+    import torch                                                  # noqa: PLC0415
+    if torch.cuda.is_available():
+        return False
+    patch_lerobot_device("cpu")
     return True
 
 
@@ -122,9 +149,10 @@ class ACTBase:
     def __init__(self, ckpt: str | Path, *, device: str = "cpu",
                  swap_cams: bool = False, use_sensor: bool = True, seed: int = 0):
         from replay_policy import LerobotPolicy      # noqa: PLC0415
-        patch_lerobot_cpu_device()                   # ★ 无 GPU 时把管线里的 cuda 覆盖成 cpu
+        # ★ 把 lerobot 管线里存的 device 对齐到本次真正使用的设备（两个方向都要对齐）
+        dev = patch_lerobot_device(device)
         self.ckpt = str(ckpt)
-        self.policy = LerobotPolicy(Path(ckpt), device=device)
+        self.policy = LerobotPolicy(Path(ckpt), device=dev)
         self.adapter = ObsAdapter(swap_cams=swap_cams, use_sensor=use_sensor, seed=seed)
         self.calls = 0
         self._pre_cached = None
