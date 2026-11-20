@@ -1,0 +1,1019 @@
+<mujoco model="so_arm101">
+  <!-- model="so_arm101"：给这个模型起个名字，随便起，不影响物理，只在日志和调试里显示。 -->
+
+  <!-- ================= 文件头 ================= -->
+
+  <!-- compiler 控制 MuJoCo 怎么“读”这个文件。 -->
+  <compiler angle="radian" meshdir="meshes" />
+  <!-- angle="radian"：这个文件里所有角度单位是【弧度】。
+       写 1.57 才是 90°；如果写 90，MuJoCo 会当成 90 弧度，姿态全错。
+       你的 joint range 全是弧度值，就是因为这一行。 -->
+  <!-- meshdir="meshes"：所有 <mesh file="x.stl"> 都去 meshes/ 目录下找，
+       不用每个 mesh 都写完整路径。 -->
+
+  <!-- option 控制全局物理选项。 -->
+  <option cone="elliptic" impratio="10" />
+  <!-- cone="elliptic"：摩擦锥形状用“椭圆锥”。
+       默认是 pyramidal（多面体金字塔锥），计算快但切向有刻面误差。
+       椭圆锥更接近真机橡胶/TPU 的摩擦行为。 -->
+  <!-- impratio="10"：切向摩擦刚度 / 法向接触刚度 的比。
+       法向要硬（防穿透），切向要稳（防滑），10 是经验值。 -->
+  <!-- 这里没写 timestep，所以用默认 0.002 秒。
+       没写 integrator，所以用默认 Euler(0)。
+       没写 gravity，所以默认 "0 0 -9.81"。 -->
+
+  <!-- ================= asset：网格 + 材质 ================= -->
+
+  <!-- asset 里声明所有 STL 模型和渲染材质。纯外观，不影响物理。 -->
+  <asset>
+    <!-- 下面 13 个 mesh 是 3D 打印件和舵机壳的 STL 文件。
+         文件名对应实物件名，不写路径因为上面 meshdir 指定了。 -->
+    <mesh file="waveshare_mounting_plate_so101_v2.stl" />   <!-- 底座安装板 -->
+    <mesh file="sts3215_03a_v1.stl" />                       <!-- STS3215 舵机壳（带 horn） -->
+    <mesh file="motor_holder_so101_base_v1.stl" />           <!-- 肩部电机座 -->
+    <mesh file="wrist_roll_follower_so101_v1.stl" />         <!-- 腕 roll 从动件 -->
+    <mesh file="moving_jaw_so101_v1.stl" />                  <!-- 活动夹爪指 -->
+    <mesh file="base_motor_holder_so101_v1.stl" />           <!-- 底座电机座 -->
+    <mesh file="upper_arm_so101_v1.stl" />                   <!-- 大臂连杆 -->
+    <mesh file="wrist_roll_pitch_so101_v2.stl" />            <!-- 腕 roll/pitch 连接件 -->
+    <mesh file="under_arm_so101_v1.stl" />                   <!-- 小臂连杆 -->
+    <mesh file="rotation_pitch_so101_v1.stl" />              <!-- 肩部 pitch 旋转件 -->
+    <mesh file="motor_holder_so101_wrist_v1.stl" />          <!-- 腕部电机座 -->
+    <mesh file="sts3215_03a_no_horn_v1.stl" />               <!-- STS3215 无 horn 版 -->
+    <mesh file="base_so101_v2.stl" />                        <!-- 底座主体 -->
+
+    <!-- 材质：只影响渲染颜色/反光，不影响物理。 -->
+    <!-- rgba="1 0 0 0.3"：红=1，绿=0，蓝=0，透明度=0.3。
+         这是碰撞体调试可视化用的半透明红。 -->
+    <material name="transparent_red" rgba="1 0 0 0.3" />
+        <!-- 改成白色 -->
+    <!-- rgba="0.95 0.95 0.95 1.0"：接近白，不透明。
+         specular=高光强度，shininess=高光锐度。都只是渲染。 -->
+    <material name="3d_printed" rgba="0.95 0.95 0.95 1.0" specular="0.3" shininess="0.5" />
+    <!-- rgba="0.1 0.1 0.1 1"：接近黑，不透明。舵机壳用。 -->
+    <material name="sts3215" rgba="0.1 0.1 0.1 1" />
+  </asset>
+
+  <!-- ================= default 第一块：类 so_arm101 ================= -->
+
+  <!-- default 是“类继承”，不是全局变量。
+       这块定义了一个叫 so_arm101 的类，base_link 用 childclass="so_arm101"
+       让整条链默认用这套参数。但每个 joint/actuator 又显式写了
+       class="sts3215"，所以下面这套大部分会被覆盖。 -->
+  <default>
+    <default class="so_arm101">
+      <!-- 这套 joint 默认值会被 sts3215 类的 0.60/0.052/0.028 覆盖。
+           damping=1：粘性阻尼，跟速度成正比。
+           frictionloss=0.1：干摩擦，不动也要用力才推得动。
+           armature=0.005：电机转子惯量折到关节侧。 -->
+      <joint damping="1" frictionloss="0.1" armature="0.005" />
+      <!-- 这套 position 默认 kp=50 会被 sts3215 类的 kp=150 覆盖。 -->
+      <position kp="50" />
+      <!-- visual 类：contype=0 conaffinity=0 => 不参与碰撞，只渲染。
+           group=2 是渲染分组，viewer 里可以按组开关显示。 -->
+      <default class="visual">
+        <geom type="mesh" contype="0" conaffinity="0" group="2" />
+      </default>
+      <!-- collision 类：group=3，半透明红，参与碰撞。
+           注意这里没写 contype/conaffinity，所以用默认值 1/1，会碰。 -->
+      <default class="collision">
+        <geom type="mesh" group="3" material="transparent_red" />
+      </default>
+    </default>
+  </default>
+
+  <!-- ================= default 第二 块：类 sts3215 ================= -->
+
+  <!-- 这块才是真正生效的参数。来源：Feetech STS3215 规格 + Lerobot 增益换算。 -->
+  <default>
+    <default class="sts3215">
+      <!-- 该类下 geom 默认不碰（contype=0 conaffinity=0）。
+           所以后面两个电机壳只写 class="visual" 就自动退出碰撞。 -->
+      <geom contype="0" conaffinity="0" />
+      <!-- damping=0.60：粘性阻尼，τ = -0.60 * qdot，速度越快阻力越大。
+           为什么：舵机内部有油阻尼 + 反电动势。
+           frictionloss=0.052：干摩擦（库仑型），大小恒定、方向与速度反向。
+           为什么：减速箱有静摩擦，不动也要用力才推得动。
+           armature=0.028：电机转子惯量折到关节侧。
+           为什么：不加的话关节“太轻”，PD 一给就冲过头。 -->
+      <joint damping="0.60" frictionloss="0.052" armature="0.028" />
+      <!-- These gains are not a 1-to-1 mapping of the servo gains used in
+           Lerobot. These position gains and forces were calculated according to
+           https://github.com/Gregory119/RBE501-RL-arm-project/blob/main/gymnasium_env/README.md,
+           assuming that the servo proportional gain is set to 16. -->
+      <!-- kp=150：位置执行器内部 PD 的 P。
+           内部公式：τ = kp*(target - q) - kv*qdot。
+           为什么 150：跟得紧但不过冲；太小跟不动，太大振荡。
+           kv=10：PD 的 D，抑制过冲。
+           forcerange=±3.35：力矩上限，来自 STS3215 堵转扭矩规格。
+           为什么：不截断 = 让仿真做出真机做不到的动作 = 仿真造假。
+           你的 probe_contact_audit.py 会读它判“真机能不能做”。 -->
+        <position kp="150" kv="10" forcerange="-3.35 3.35" />
+    </default>
+
+    <!-- 类 backlash：模拟舵机齿轮间隙 ±0.5°。
+         为什么定义：为以后真实回差建模预留。
+         当前没有任何 joint 写 class="backlash"，所以定义了但没启用。 -->
+    <default class="backlash">
+      <!-- +/- 0.5° of backlash -->
+      <joint
+        damping="0.01"          <!-- 回差关节的阻尼，很小 -->
+        frictionloss="0"        <!-- 回差关节不设干摩擦 -->
+        armature="0.01"         <!-- 回差关节的转子惯量，很小 -->
+        limited="true"          <!-- 这个 range 生效 -->
+        range="-0.008726646259971648 0.008726646259971648"  <!-- ±0.5° 换算成弧度 -->
+      />
+    </default>
+  </default>
+
+  <!-- ================= worldbody：场景 + 机械臂 ================= -->
+
+  <!-- worldbody 是 MuJoCo 的“世界”，所有 body、joint、geom、site、camera 都在里面。
+       body 是树结构，每个 body 相对父 body 定位。 -->
+  <worldbody>
+    <!-- Link base -->
+
+    <!-- env_camera：环境相机，固定在世界坐标，拍桌面全景。
+         和 wrist_camera 配对输入 ACT。
+         mode="fixed"：相机固定不动。
+         pos：相机在世界坐标的位置。
+         xyaxes：前两个三元组是相机的 x 轴和 y 轴方向。
+         fovy="30"：垂直视场角 30°。 -->
+    <camera name="env_camera" mode="fixed" pos="0.5814 -0.0418 0.5919" xyaxes="0 1 0 -0.82 0 0.57" fovy="30"/>
+
+    <!-- base_link：整条机械臂链的根。
+         childclass="so_arm101"：所有子 body 默认继承 so_arm101 类。 -->
+    <body name="base_link" childclass="so_arm101">
+      <!-- inertial：物理属性，必须写，否则力矩算错。
+           pos：质心相对 base_link 局部坐标的位置。
+           mass：质量 0.253 kg。
+           fullinertia：惯性张量 6 个数（ixx iyy izz ixy ixz iyz）。
+           怎么用：m.body_mass[i]、m.body_inertia[i]、m.body_ipos[i]。 -->
+      <inertial
+        pos="0.0137179 -5.19711e-05 0.0334843"
+        mass="0.253"
+        fullinertia="0.000197385 0.000234269 0.000224368 -7.91334e-07 8.55641e-06 1.67853e-07"
+      />
+      <!-- 以下 4 个 geom 都是 class="visual"：只渲染，不碰。
+           pos：相对 base_link 的位置。
+           quat：相对 base_link 的四元数姿态。
+           mesh：引用 asset 里的 STL。
+           material：渲染材质。 -->
+      <geom
+        class="visual"                    <!-- visual 类，不碰 -->
+        pos="-0.00636471 -9.94414e-05 -0.0024"   <!-- 相对位置 -->
+        quat="0.5 0.5 0.5 0.5"           <!-- 四元数姿态 -->
+        mesh="base_motor_holder_so101_v1" <!-- 用哪个 STL -->
+        material="3d_printed"            <!-- 白色材质 -->
+      />
+      <geom
+        class="visual"
+        pos="-0.00636471 -8.97657e-09 -0.0024"
+        quat="0.5 0.5 0.5 0.5"
+        mesh="base_so101_v2"
+        material="3d_printed"
+      />
+      <geom
+        class="visual"
+        pos="0.0263353 -8.97657e-09 0.0437"
+        quat="1 -2.85511e-16 -9.64433e-17 6.12908e-16"
+        mesh="sts3215_03a_v1"
+        material="sts3215"               <!-- 黑色舵机壳材质 -->
+      />
+      <geom
+        class="visual"
+        pos="-0.0309827 -0.000199441 0.0474"
+        quat="0.5 0.5 0.5 0.5"
+        mesh="waveshare_mounting_plate_so101_v2"
+        material="3d_printed"
+      />
+      <!-- baseframe：基座标记点。
+           site 没有质量、不参与碰撞，只是一个坐标参考。
+           怎么用：site_id = mj_name2id(m, mjOBJ_SITE, "baseframe")；
+                   data.site_xpos[site_id] 读它在世界里的位置。 -->
+      <site
+        group="5"                         <!-- 渲染分组 5 -->
+        name="baseframe"                  <!-- 名字，Python 里按名字找 -->
+        pos="8.67362e-19 9.55596e-18 3.46945e-18"  <!-- 相对位置，基本在原点 -->
+        quat="1 -8.17396e-19 3.78392e-17 2.22045e-16"  <!-- 单位四元数 -->
+      />
+
+      <!-- Link shoulder -->
+      <!-- shoulder_link：肩部 body，相对 base_link 定位。
+           pos：肩关节在 base_link 局部系的位置。
+           quat：肩 body 相对 base 的旋转，把局部 z 轴转到竖直方向。 -->
+      <body
+        name="shoulder_link"
+        pos="0.0388353 -8.97657e-09 0.0624"
+        quat="3.56167e-16 1.22818e-15 -1 -4.14635e-16"
+      >
+        <!-- shoulder_pan_joint：绕 body 局部 z 轴转。
+             因为 body 的 quat 把局部 z 转到了世界竖直方向，
+             所以绕局部 z 转 = 绕竖直轴 pan。
+             type="hinge"：转的关节（不是滑的）。
+             range=±1.9199 rad = ±110°。
+             class="sts3215"：用上面那套 damping/frictionloss/armature。
+             怎么用：data.qpos[qpos_adr] 就是这个角。 -->
+        <joint
+          axis="0 0 1"                    <!-- 绕局部 z 轴 -->
+          name="shoulder_pan_joint"
+          type="hinge"                    <!-- 转动关节 -->
+          range="-1.9198621771937616 1.9198621771937634"  <!-- ±110° -->
+          class="sts3215"
+        />
+        <!-- shoulder 的质量 0.118 kg，质心和惯性张量。 -->
+        <inertial
+          pos="-0.0307604 -1.66727e-05 -0.0252713"
+          mass="0.118"
+          fullinertia="9.88297e-05 9.56218e-05 2.82927e-05 8.91466e-08 -1.37275e-06 1.82491e-07"
+        />
+        <!-- visual + collision 成对：同一 mesh 两份。
+             visual 不碰，collision 碰。
+             为什么成对：外观要好看，碰撞要准确，两回事。 -->
+        <geom
+          class="visual"
+          pos="-0.0303992 0.000422241 -0.0417"
+          quat="0.5 0.5 0.5 -0.5"
+          mesh="sts3215_03a_v1"
+          material="sts3215"
+        />
+        <geom
+          class="collision"               <!-- collision 类，会碰 -->
+          pos="-0.0303992 0.000422241 -0.0417"
+          quat="0.5 0.5 0.5 -0.5"
+          mesh="sts3215_03a_v1"
+          material="sts3215"
+        />
+        <geom
+          class="visual"
+          pos="-0.0675992 -0.000177759 0.0158499"
+          quat="0.5 0.5 -0.5 0.5"
+          mesh="motor_holder_so101_base_v1"
+          material="3d_printed"
+        />
+        <geom
+          class="collision"
+          pos="-0.0675992 -0.000177759 0.0158499"
+          quat="0.5 0.5 -0.5 0.5"
+          mesh="motor_holder_so101_base_v1"
+          material="3d_printed"
+        />
+        <geom
+          class="visual"
+          pos="0.0122008 2.22413e-05 0.0464"
+          quat="0.707107 -0.707107 -0 8.3163e-34"
+          mesh="rotation_pitch_so101_v1"
+          material="3d_printed"
+        />
+        <geom
+          class="collision"
+          pos="0.0122008 2.22413e-05 0.0464"
+          quat="0.707107 -0.707107 -0 8.3163e-34"
+          mesh="rotation_pitch_so101_v1"
+          material="3d_printed"
+        />
+
+        <!-- Link upper_arm -->
+        <!-- upper_arm_link：大臂，相对 shoulder_link 定位。 -->
+        <body
+          name="upper_arm_link"
+          pos="-0.0303992 -0.0182778 -0.0542"
+          quat="0.5 -0.5 -0.5 -0.5"
+        >
+          <!-- shoulder_lift_joint：绕局部 z 轴。
+               这个 body 的 quat 把局部 z 转到了水平方向，
+               所以绕局部 z 转 = 俯仰 lift。
+               range=±1.7453 rad = ±100°。 -->
+          <joint
+            axis="0 0 1"
+            name="shoulder_lift_joint"
+            type="hinge"
+            range="-1.7453292519943224 1.7453292519943366"
+            class="sts3215"
+          />
+          <inertial
+            pos="-0.0898471 -0.00838224 0.0184089"
+            mass="0.123"
+            fullinertia="4.87226e-05 0.000175923 0.000170154 -2.3623e-05 -4.81272e-08 1.07156e-08"
+          />
+          <!-- ★ 大臂末端电机壳：只有 visual，没有 collision。
+               为什么：这个壳从连杆侧面凸出 ~2cm，下探到桌面附近时
+               会先于指尖撞桌子，把整条手臂顶偏，实测 TCP 跟踪误差 12.5 mm。
+               去掉它的碰撞后，指尖才能先到抓取位。
+               面试可讲：几何模型和真实碰撞不一致的典型修复。 -->
+          <geom
+            class="visual"
+            pos="-0.11257 -0.0155 0.0187"
+            quat="4.56308e-16 -0.707107 0.707107 -1.37383e-16"
+            mesh="sts3215_03a_v1"
+            material="sts3215"
+          />
+          <!-- 大臂主结构：visual + collision 成对，碰撞保留。 -->
+          <geom
+            class="visual"
+            pos="-0.065085 0.012 0.0182"
+            quat="0 1 0 0"
+            mesh="upper_arm_so101_v1"
+            material="3d_printed"
+          />
+          <geom
+            class="collision"
+            pos="-0.065085 0.012 0.0182"
+            quat="0 1 0 0"
+            mesh="upper_arm_so101_v1"
+            material="3d_printed"
+          />
+
+          <!-- Link lower_arm -->
+          <body
+            name="lower_arm_link"
+            pos="-0.11257 -0.028 1.73763e-16"
+            quat="0.707107 -5.98613e-17 -2.58051e-17 0.707107"
+          >
+            <!-- elbow_flex_joint：绕局部 z 轴，range -1.69 ~ 1.54 rad。 -->
+            <joint
+              axis="0 0 1"
+              name="elbow_flex_joint"
+              type="hinge"
+              range="-1.69 1.54"
+              class="sts3215"
+            />
+            <inertial
+              pos="-0.0980701 0.00324376 0.0182831"
+              mass="0.124"
+              fullinertia="3.42715e-05 0.000190583 0.00017323 8.83681e-06 1.50718e-06 -5.84455e-08"
+            />
+            <geom
+              class="visual"
+              pos="-0.0648499 -0.032 0.0182"
+              quat="0 1 0 0"
+              mesh="under_arm_so101_v1"
+              material="3d_printed"
+            />
+            <geom
+              class="collision"
+              pos="-0.0648499 -0.032 0.0182"
+              quat="0 1 0 0"
+              mesh="under_arm_so101_v1"
+              material="3d_printed"
+            />
+            <geom
+              class="visual"
+              pos="-0.0648499 -0.032 0.018"
+              quat="3.92687e-16 -1 -1.9186e-15 -6.38378e-16"
+              mesh="motor_holder_so101_wrist_v1"
+              material="3d_printed"
+            />
+            <geom
+              class="collision"
+              pos="-0.0648499 -0.032 0.018"
+              quat="3.92687e-16 -1 -1.9186e-15 -6.38378e-16"
+              mesh="motor_holder_so101_wrist_v1"
+              material="3d_printed"
+            />
+            <!-- ★ 小臂末端电机壳：同上，只有 visual，退出碰撞。 -->
+            <geom
+              class="visual"
+              pos="-0.1224 0.0052 0.0187"
+              quat="7.21645e-16 1.56949e-15 1 -3.33067e-16"
+              mesh="sts3215_03a_v1"
+              material="sts3215"
+            />
+
+            <!-- Link wrist -->
+            <body
+              name="wrist_link"
+              pos="-0.1349 0.0052 3.62355e-17"
+              quat="0.707388 0.0 0.0 -0.706825"
+            >
+              <!-- wrist_flex_joint：绕局部 z 轴，range ±1.6 rad（±91.7°）。
+                   这个关节就是“腕部约定冲突”里的 wrist_flex：
+                   真机遥操接近张开时 +63°，仿真 -2°，差 64.7°。
+                   怎么用：log_gripper_rollout.py 会打它。 -->
+              <joint
+                axis="0 0 1"
+                name="wrist_flex_joint"
+                type="hinge"
+                range="-1.6 1.6"
+                class="sts3215"
+              />
+              <inertial
+                pos="-0.000103312 -0.0386143 0.0281156"
+                mass="0.096"
+                fullinertia="4.47509e-05 3.08549e-05 2.5519e-05 2.17434e-08 -6.41776e-08 4.42475e-06"
+              />
+              <geom
+                class="visual"
+                pos="8.32667e-17 -0.0424 0.0306"
+                quat="0.5 0.5 0.5 -0.5"
+                mesh="sts3215_03a_no_horn_v1"
+                material="3d_printed"
+              />
+              <geom
+                class="collision"
+                pos="8.32667e-17 -0.0424 0.0306"
+                quat="0.5 0.5 0.5 -0.5"
+                mesh="sts3215_03a_no_horn_v1"
+                material="3d_printed"
+              />
+              <geom
+                class="visual"
+                pos="0 -0.028 0.0181"
+                quat="0.5 -0.5 -0.5 -0.5"
+                mesh="wrist_roll_pitch_so101_v2"
+                material="3d_printed"
+              />
+              <geom
+                class="collision"
+                pos="0 -0.028 0.0181"
+                quat="0.5 -0.5 -0.5 -0.5"
+                mesh="wrist_roll_pitch_so101_v2"
+                material="3d_printed"
+              />
+
+              <!-- Link gripper -->
+              <body
+                name="gripper_link"
+                pos="0.0 -0.0611 0.0181"
+                quat="0.000563 -0.000563 0.707388 0.706825"
+              >
+                <!-- wrist_roll_joint：绕局部 z 轴，range ±π。
+                     为什么是 ±π：真机标定 0~4095 counts = 360°，
+                     原来只给 ±2.3 rad（263.6°），少 96°，已按实测改正。
+                     roll=-90° 是 collect.py:307 的常量，实测可用窗口 ±1°。
+                     怎么用：compare_release_ab.py 对比 A/B 的 roll。 -->
+                <joint
+                  axis="0 0 1"
+                  name="wrist_roll_joint"
+                  type="hinge"
+                  range="-3.1416 3.1416"
+                  class="sts3215"
+                />
+                <!-- wrist_camera：腕部相机，跟着 gripper_link 动。
+                     为什么：真机 wrist 相机拍近景，和 env 相机配对输入 ACT。
+                     怎么用：renderer.update_scene(data, camera=wrist_cam_id)；
+                            双相机视频导出到 LeRobot v3.0。 -->
+                <camera name="wrist_camera" mode="fixed" fovy="30"
+                  pos="-0.000099 0.061885 -0.018949"
+                  xyaxes="0.999999 0.001592 -0.000001 -0.001424 0.894070 -0.447926" />
+                <inertial
+                  pos="0.000213627 0.000245138 -0.025187"
+                  mass="0.132"
+                  fullinertia="4.17373e-05 6.57962e-05 5.23538e-05 -5.08642e-07 -8.70168e-06 -7.85699e-08"
+                />
+                <!-- 腕部舵机壳：visual + collision 成对。
+                     collision 写了 contype=8 conaffinity=1：
+                     位掩码，和通用件(bit0=1)碰，和指垫(bit2=4)不碰。
+                     为什么：指垫不能和指壳自碰撞。 -->
+                <geom
+                  class="visual"
+                  pos="0.0077 0.0001 -0.0234"
+                  quat="0.707107 -0.707107 1.66015e-15 6.45094e-15"
+                  mesh="sts3215_03a_v1"
+                  material="sts3215"
+                />
+                <geom
+                  class="collision"
+                  pos="0.0077 0.0001 -0.0234"
+                  quat="0.707107 -0.707107 1.66015e-15 6.45094e-15"
+                  mesh="sts3215_03a_v1"
+                  material="sts3215"
+                  contype="8" conaffinity="1"
+                />
+                <geom
+                  class="visual"
+                  pos="8.32667e-17 -0.000218214 0.000949706"
+                  quat="0 1 0 0"
+                  mesh="wrist_roll_follower_so101_v1"
+                  material="3d_printed"
+                />
+                <geom
+                  class="collision"
+                  pos="8.32667e-17 -0.000218214 0.000949706"
+                  quat="0 1 0 0"
+                  mesh="wrist_roll_follower_so101_v1"
+                  material="3d_printed"
+                  contype="8" conaffinity="1"
+                />
+                <!-- ★ 固定指指垫（背板）。
+                     位置不是拍的：按 descend 段末真实 TCP=23.57 mm
+                     （PD 稳态误差让臂停在这，不是 IK 目标的 12 mm）用 FK 反算。
+                     为什么不可见：rgba 全 0，只做物理不做渲染。
+                     为什么 contype=4 conaffinity=2：只和药盒(bit1=2)、
+                     通用件(bit0=1)碰，不和指壳(bit3=8)碰。
+                     参数：condim=4（法向+2切向+1扭转）、
+                     friction 1.2（橡胶/TPU 量级）、
+                     solref 0.02 1（硬、临界阻尼）、
+                     solimp 0.9 0.95 0.001（很硬）。
+                     怎么用：probe_contact_audit.py 读 data.contact[i].dist
+                     判 G1–G6；fn_grip 峰值 2.37 N 就是这个垫产生的。 -->
+                <geom
+                  name="pad_gripper_link" type="box" size="0.0250 0.0010 0.0200"  <!-- 34x2x34 mm 平板 -->
+                  pos="-0.001237 -0.000128 -0.091589"   <!-- 相对 gripper_link 位置 -->
+                  quat="0.741404 -0.318476 0.231482 0.543423"  <!-- 姿态 -->
+                  contype="4" conaffinity="2"           <!-- 位掩码：只和药盒/通用件碰 -->
+                  condim="4"                            <!-- 法向+2切向+1扭转 -->
+                  friction="1.2 0.01 0.0001"            <!-- 滑动μ=1.2，扭转0.01，滚动0.0001 -->
+                  solref="0.02 1"                       <!-- 接触时间常数0.02s，阻尼比1 -->
+                  solimp="0.9 0.95 0.001"               <!-- 阻抗曲线，很硬 -->
+                  rgba="0 0 0 0"                        <!-- 全透明，不渲染 -->
+                />
+                <!-- gripperframe：末端标记点，IK 的核心。
+                     怎么用：site_id = mj_name2id(m, mjOBJ_SITE, "gripperframe")；
+                             data.site_xpos[site_id] 就是末端世界坐标；
+                             mj_jacSite(m, d, J, None, site_id) 得 3×nv 平移雅可比。
+                     你的 IK 残差 0.000923 m 就是拿 site_xpos 和目标比出来的。 -->
+                <site
+                  group="5"
+                  name="gripperframe"
+                  pos="-0.0079 -0.000218121 -0.0981274"
+                  quat="0.707107 -0 0.707107 -2.37788e-17"
+                />
+
+                <!-- Link jaw -->
+                <body
+                  name="jaw_link"
+                  pos="0.0202 0.0188 -0.0234"
+                  quat="0.704244 0.704246 0.063554 -0.063554"
+                >
+                  <!-- gripper_joint：0~2.232 rad。
+                       合爪约 0.28 rad（9.16 counts）。
+                       axis="0 0 1" 经 body quat 变换后对应上下闭合方向。
+                       曾误改为绕 TCP z 轴，导致开合变水平旋转，已回退。
+                       怎么用：data.qpos 读；action 第 6 维就是它。 -->
+                  <joint
+                    axis="0 0 1"
+                    name="gripper_joint"
+                    type="hinge"
+                    range="0.0 2.232"
+                    class="sts3215"
+                  />
+                  <inertial
+                    pos="-0.00157495 -0.0300244 0.0192755"
+                    mass="0.014"
+                    fullinertia="7.71665e-06 2.20537e-06 6.16861e-06 -3.73108e-07 -6.8917e-09 -1.28269e-07"
+                  />
+                  <geom
+                    class="visual"
+                    pos="-5.55112e-17 -5.55112e-17 0.0189"
+                    quat="1 -0 3.00524e-16 -2.00834e-17"
+                    mesh="moving_jaw_so101_v1"
+                    material="sts3215"
+                  />
+                  <geom
+                    class="collision"
+                    pos="-5.55112e-17 -5.55112e-17 0.0189"
+                    quat="1 -0 3.00524e-16 -2.00834e-17"
+                    mesh="moving_jaw_so101_v1"
+                    material="sts3215"
+                    contype="8" conaffinity="1"       <!-- 和通用件碰，和指垫不碰 -->
+                  />
+                  <!-- ★ 活动指指垫（压头）。
+                       和固定指不同：活动指必须过压进药盒 0.4 mm，
+                       否则合到底也夹不到。实测两版就差这 1.6 mm。
+                       参数同固定指。 -->
+                  <geom
+                    name="pad_jaw_link" type="box" size="0.0250 0.0010 0.0200"
+                    pos="-0.016348 -0.064197 0.021437"
+                    quat="0.309705 -0.721127 0.584713 0.205353"
+                    contype="4" conaffinity="2"
+                    condim="4"
+                    friction="1.2 0.01 0.0001"
+                    solref="0.02 1" solimp="0.9 0.95 0.001"
+                    rgba="0 0 0 0"
+                  />
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <!-- ================= actuator：6 个位置执行器 ================= -->
+
+  <!-- 6 个 position 对应 6 个 joint => nu=6。
+       ctrl 是目标关节角（rad），不是力矩。
+       内部 PD：τ = kp*(ctrl-q) - kv*qdot，再被 forcerange 截断。 -->
+  <actuator>
+    <position
+      class="sts3215"                     <!-- 用 kp=150 / kv=10 / forcerange=±3.35 -->
+      name="shoulder_pan_joint"           <!-- 执行器名 -->
+      joint="shoulder_pan_joint"          <!-- 绑定哪个 joint -->
+      forcerange="-3.35 3.35"             <!-- 力矩上限，和类里一致，冗余但清楚 -->
+      ctrlrange="-1.91986 1.91986"        <!-- ctrl 允许范围，和 joint range 一致 -->
+    />
+    <position
+      class="sts3215"
+      name="shoulder_lift_joint"
+      joint="shoulder_lift_joint"
+      forcerange="-3.35 3.35"
+      ctrlrange="-1.74533 1.74533"
+    />
+    <position
+      class="sts3215"
+      name="elbow_flex_joint"
+      joint="elbow_flex_joint"
+      forcerange="-3.35 3.35"
+      ctrlrange="-1.69 1.54"
+    />
+    <position
+      class="sts3215"
+      name="wrist_flex_joint"
+      joint="wrist_flex_joint"
+      forcerange="-3.35 3.35"
+      ctrlrange="-1.6 1.6"
+    />
+    <position
+      class="sts3215"
+      name="wrist_roll_joint"
+      joint="wrist_roll_joint"
+      forcerange="-3.35 3.35"
+      ctrlrange="-3.1416 3.1416"
+    />
+    <position
+      class="sts3215"
+      name="gripper_joint"
+      joint="gripper_joint"
+      forcerange="-3.35 3.35"
+      ctrlrange="0.0 2.232"
+    />
+  </actuator>
+
+  <!-- ================= contact exclude ================= -->
+
+  <!-- 相邻连杆之间不检测碰撞。
+       为什么：关节一转就“自己碰自己”，求解器打架、产生假接触力。
+       标准做法，不是偷懒。
+       怎么用：这些对不会出现在 data.contact 里。 -->
+  <contact>
+    <exclude body1="base_link" body2="shoulder_link" />
+    <exclude body1="shoulder_link" body2="upper_arm_link" />
+    <exclude body1="upper_arm_link" body2="lower_arm_link" />
+    <exclude body1="lower_arm_link" body2="wrist_link" />
+    <exclude body1="wrist_link" body2="gripper_link" />
+    <exclude body1="gripper_link" body2="jaw_link" />
+  </contact>
+</mujoco>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<mujoco model="so_arm101">
+  <!-- model 名：【工具】 -->
+
+  <!-- ================= 文件头 ================= -->
+
+  <compiler angle="radian" meshdir="meshes" />
+  <!-- angle="radian"：【工具】。
+       物理含义：全文件角度单位是弧度。写 1.57 才是 90°。
+       项目里怎么用：m.jnt_range 读出来就是弧度；IK 里 np.clip(q, jnt_lo, jnt_hi) 用的也是弧度。
+       meshdir="meshes"：【工具】。STL 去 meshes/ 找。 -->
+
+  <option cone="elliptic" impratio="10" />
+  <!-- option 标签：【工具】生成空标签。
+       cone="elliptic"：【你调】。
+       物理含义：摩擦锥用椭圆锥，比默认 pyramidal（多面体金字塔）更接近真机橡胶/TPU。
+       项目里怎么用：m.opt.cone 读到 1（elliptic）。抓取时切向摩擦方向更准。
+       impratio="10"：【你调】。
+       物理含义：切向摩擦刚度 / 法向接触刚度 的比。
+       项目里怎么用：m.opt.impratio。法向要硬防穿透，切向要稳防滑，10 是经验值。
+       没写 timestep => 默认 0.002 s（每步 2 ms）。
+       没写 integrator => 默认 Euler(0)（简单快，接触硬时可能抖）。
+       没写 gravity => 默认 "0 0 -9.81"。 -->
+
+  <!-- ================= asset ================= -->
+
+  <asset>
+    <!-- 13 个 mesh：【工具】从 meshes/ 目录自动列。纯几何，不影响物理。 -->
+    <mesh file="waveshare_mounting_plate_so101_v2.stl" />
+    <mesh file="sts3215_03a_v1.stl" />
+    <mesh file="motor_holder_so101_base_v1.stl" />
+    <mesh file="wrist_roll_follower_so101_v1.stl" />
+    <mesh file="moving_jaw_so101_v1.stl" />
+    <mesh file="base_motor_holder_so101_v1.stl" />
+    <mesh file="upper_arm_so101_v1.stl" />
+    <mesh file="wrist_roll_pitch_so101_v2.stl" />
+    <mesh file="under_arm_so101_v1.stl" />
+    <mesh file="rotation_pitch_so101_v1.stl" />
+    <mesh file="motor_holder_so101_wrist_v1.stl" />
+    <mesh file="sts3215_03a_no_horn_v1.stl" />
+    <mesh file="base_so101_v2.stl" />
+
+    <!-- 3 个 material：【工具】生成默认，rgba 改成白色是【你改】。只影响渲染，不影响物理。 -->
+    <material name="transparent_red" rgba="1 0 0 0.3" />
+        <!-- 改成白色 -->
+    <material name="3d_printed" rgba="0.95 0.95 0.95 1.0" specular="0.3" shininess="0.5" />
+    <material name="sts3215" rgba="0.1 0.1 0.1 1" />
+  </asset>
+
+  <!-- ================= default 第一块：外层壳 ================= -->
+
+  <default>
+    <default class="so_arm101">
+      <!-- 整块：【工具】。实际被 sts3215 覆盖，下面这些值不生效。
+           damping=1：粘性阻尼，跟速度成正比（τ = -damping * qdot）。
+           frictionloss=0.1：干摩擦（库仑型），不动也要用力才推得动。
+           armature=0.005：电机转子惯量折到关节侧。
+           kp=50：位置执行器弹簧刚度。 -->
+      <joint damping="1" frictionloss="0.1" armature="0.005" />
+      <position kp="50" />
+      <!-- visual 类：contype=0 conaffinity=0 => 不碰，只渲染。 -->
+      <default class="visual">
+        <geom type="mesh" contype="0" conaffinity="0" group="2" />
+      </default>
+      <!-- collision 类：group=3，半透明红，参与碰撞（默认 contype=1 conaffinity=1）。 -->
+      <default class="collision">
+        <geom type="mesh" group="3" material="transparent_red" />
+      </default>
+    </default>
+  </default>
+
+  <!-- ================= default 第二块：真正生效的 sts3215 ================= -->
+
+  <default>
+    <default class="sts3215">
+      <!-- 整个 sts3215 类：【你填】。来源：STS3215 规格 + Lerobot 增益换算。 -->
+      <geom contype="0" conaffinity="0" />
+      <!-- 【你填】。物理含义：该类下 geom 默认不碰。
+           所以后面两个电机壳只写 class="visual" 就自动退出碰撞。 -->
+
+      <joint damping="0.60" frictionloss="0.052" armature="0.028" />
+      <!-- 【你填】。三个物理参数，大白话：
+           damping=0.60：粘性阻尼。τ_damp = -0.60 * qdot。
+               速度越快阻力越大，像在糖浆里转。
+               为什么：舵机内部有油阻尼 + 反电动势。
+               项目里：m.jnt_damping 读；影响关节跟目标角的速度。
+           frictionloss=0.052：干摩擦（库仑型）。大小恒定，方向与速度反向。
+               不动的时候也要用力才推得动。
+               为什么：减速箱有静摩擦。
+               项目里：m.jnt_frictionloss 读；低速“推不动”就是它。
+           armature=0.028：电机转子惯量折到关节侧。
+               为什么：不加的话关节“太轻”，PD 一给就冲过头。
+               项目里：m.jnt_armature 读。 -->
+
+      <!-- These gains are not a 1-to-1 mapping of the servo gains used in
+           Lerobot. ... -->  <!-- 【你写】查文档后补的换算说明。 -->
+
+      <position kp="150" kv="10" forcerange="-3.35 3.35" />
+      <!-- 【你填】。三个物理参数，大白话：
+           kp=150：位置执行器内部 PD 的 P。
+               内部公式：τ = kp*(target - q) - kv*qdot。
+               kp 大 => 跟得紧、硬；kp 小 => 软、跟不动。
+               项目里：m.actuator_gainprm[i,0] 读。
+           kv=10：PD 的 D，阻尼。防冲过头、防振荡。
+               项目里：m.actuator_biasprm[i,1] 读。
+           forcerange=±3.35：力矩上限，来自 STS3215 堵转扭矩。
+               不截断 = 让仿真做出真机做不到的动作 = 仿真造假。
+               项目里：m.actuator_forcerange 读；
+                       probe_contact_audit.py 判“这个动作真机能不能做”。 -->
+    </default>
+
+    <default class="backlash">
+      <!-- 【你写】。预留类，当前没有 joint 挂它，定义了但未启用。
+           range=±0.008727 rad = ±0.5°，模拟齿轮间隙。 -->
+      <joint
+        damping="0.01"
+        frictionloss="0"
+        armature="0.01"
+        limited="true"
+        range="-0.008726646259971648 0.008726646259971648"
+      />
+    </default>
+  </default>
+
+  <!-- ================= worldbody ================= -->
+
+  <worldbody>
+    <!-- env_camera：【你写】。固定世界坐标，拍桌面全景，和 wrist 相机配对输入 ACT。 -->
+    <camera name="env_camera" mode="fixed" pos="0.5814 -0.0418 0.5919" xyaxes="0 1 0 -0.82 0 0.57" fovy="30"/>
+
+    <body name="base_link" childclass="so_arm101">
+      <!-- body 的 name/pos/quat/childclass：【工具】。 -->
+
+      <inertial
+        pos="0.0137179 -5.19711e-05 0.0334843"
+        mass="0.253"
+        fullinertia="0.000197385 0.000234269 0.000224368 -7.91334e-07 8.55641e-06 1.67853e-07"
+      />
+      <!-- 【工具】。物理含义：
+           pos：质心相对 body 的位置。mass：质量 0.253 kg。
+           fullinertia：惯性张量 6 个数（ixx iyy izz ixy ixz iyz）。
+           项目里：m.body_mass / m.body_inertia / m.body_ipos 读；
+                   重力补偿、力矩分析会用到。 -->
+
+      <!-- 4 个 visual：【工具】。只渲染，不碰。 -->
+      <geom class="visual" pos="-0.00636471 -9.94414e-05 -0.0024" quat="0.5 0.5 0.5 0.5" mesh="base_motor_holder_so101_v1" material="3d_printed" />
+      <geom class="visual" pos="-0.00636471 -8.97657e-09 -0.0024" quat="0.5 0.5 0.5 0.5" mesh="base_so101_v2" material="3d_printed" />
+      <geom class="visual" pos="0.0263353 -8.97657e-09 0.0437" quat="1 -2.85511e-16 -9.64433e-17 6.12908e-16" mesh="sts3215_03a_v1" material="sts3215" />
+      <geom class="visual" pos="-0.0309827 -0.000199441 0.0474" quat="0.5 0.5 0.5 0.5" mesh="waveshare_mounting_plate_so101_v2" material="3d_printed" />
+
+      <!-- baseframe：【你写】。无质量标记点，IK/FK 参考。
+           项目里：mj_name2id(m, mjOBJ_SITE, "baseframe") + data.site_xpos。 -->
+      <site group="5" name="baseframe" pos="8.67362e-19 9.55596e-18 3.46945e-18" quat="1 -8.17396e-19 3.78392e-17 2.22045e-16" />
+
+      <body name="shoulder_link" pos="0.0388353 -8.97657e-09 0.0624" quat="3.56167e-16 1.22818e-15 -1 -4.14635e-16">
+        <!-- 【工具】。 -->
+
+        <joint axis="0 0 1" name="shoulder_pan_joint" type="hinge" range="-1.9198621771937616 1.9198621771937634" class="sts3215" />
+        <!-- axis/type/name：【工具】。range 数值：【你改】按真机 ±110°。class：【你填】。
+           物理含义：绕 body 局部 z 轴（经 quat 后=竖直轴）转，±1.9199 rad。
+           项目里：data.qpos[qpos_adr] 就是它；m.jnt_range 读限位。 -->
+
+        <inertial pos="-0.0307604 -1.66727e-05 -0.0252713" mass="0.118" fullinertia="9.88297e-05 9.56218e-05 2.82927e-05 8.91466e-08 -1.37275e-06 1.82491e-07" />
+        <!-- 【工具】。质量 0.118 kg。 -->
+
+        <!-- visual + collision 成对：【工具】。外观不碰，碰撞会碰。 -->
+        <geom class="visual" pos="-0.0303992 0.000422241 -0.0417" quat="0.5 0.5 0.5 -0.5" mesh="sts3215_03a_v1" material="sts3215" />
+        <geom class="collision" pos="-0.0303992 0.000422241 -0.0417" quat="0.5 0.5 0.5 -0.5" mesh="sts3215_03a_v1" material="sts3215" />
+        <geom class="visual" pos="-0.0675992 -0.000177759 0.0158499" quat="0.5 0.5 -0.5 0.5" mesh="motor_holder_so101_base_v1" material="3d_printed" />
+        <geom class="collision" pos="-0.0675992 -0.000177759 0.0158499" quat="0.5 0.5 -0.5 0.5" mesh="motor_holder_so101_base_v1" material="3d_printed" />
+        <geom class="visual" pos="0.0122008 2.22413e-05 0.0464" quat="0.707107 -0.707107 -0 8.3163e-34" mesh="rotation_pitch_so101_v1" material="3d_printed" />
+        <geom class="collision" pos="0.0122008 2.22413e-05 0.0464" quat="0.707107 -0.707107 -0 8.3163e-34" mesh="rotation_pitch_so101_v1" material="3d_printed" />
+
+     site group="5" name="gripperframe"   <body name="upper_arm_link" pos="-0.0303992 -0.0182778 -0.0542" quat="0.5 -0.5 -0.5 -0.5">
+          <!-- 【工具】。 -->
+
+          <joint axis="0 0 1" name="shoulder_lift_joint" type="hinge" range="-1.7453292519943224 1.7453292519943366" class="sts3215" />
+          <!-- 结构【工具】，range【你改】±100°，class【你填】。
+               物理含义：绕局部 z（经 quat 后=水平俯仰轴），±1.7453 rad。
+               项目里：data.qpos 读；IK 里是 5 个臂关节之一。 -->
+
+          <inertial pos="-0.0898471 -0.00838224 0.0184089" mass="0.123" fullinertia="4.87226e-05 0.000175923 0.000170154 -2.3623e-05 -4.81272e-08 1.07156e-08" />
+          <!-- 【工具】。质量 0.123 kg。 -->
+
+          <!-- ★ 大臂末端电机壳：只有 visual，【你删】了 collision。
+               为什么：凸出 2cm，下探先撞桌，TCP 误差 12.5 mm。
+               项目里：probe_contact_audit.py 的 G1（下探零接触）验证。 -->
+          <geom class="visual" pos="-0.11257 -0.0155 0.0187" quat="4.56308e-16 -0.707107 0.707107 -1.37383e-16" mesh="sts3215_03a_v1" material="sts3215" />
+
+          <!-- 大臂主结构：visual + collision 成对，【工具】，你保留。 -->
+          <geom class="visual" pos="-0.065085 0.012 0.0182" quat="0 1 0 0" mesh="upper_arm_so101_v1" material="3d_printed" />
+          <geom class="collision" pos="-0.065085 0.012 0.0182" quat="0 1 0 0" mesh="upper_arm_so101_v1" material="3d_printed" />
+
+          <body name="lower_arm_link" pos="-0.11257 -0.028 1.73763e-16" quat="0.707107 -5.98613e-17 -2.58051e-17 0.707107">
+            <!-- 【工具】。 -->
+
+            <joint axis="0 0 1" name="elbow_flex_joint" type="hinge" range="-1.69 1.54" class="sts3215" />
+            <!-- 结构【工具】，range【你改】，class【你填】。
+                 物理含义：-1.69 ~ 1.54 rad（约 -97° ~ +88°）。 -->
+
+            <inertial pos="-0.0980701 0.00324376 0.0182831" mass="0.124" fullinertia="3.42715e-05 0.000190583 0.00017323 8.83681e-06 1.50718e-06 -5.84455e-08" />
+            <!-- 【工具】。质量 0.124 kg。 -->
+
+            <geom class="visual" pos="-0.0648499 -0.032 0.0182" quat="0 1 0 0" mesh="under_arm_so101_v1" material="3d_printed" />
+            <geom class="collision" pos="-0.0648499 -0.032 0.0182" quat="0 1 0 0" mesh="under_arm_so101_v1" material="3d_printed" />
+            <geom class="visual" pos="-0.0648499 -0.032 0.018" quat="3.92687e-16 -1 -1.9186e-15 -6.38378e-16" mesh="motor_holder_so101_wrist_v1" material="3d_printed" />
+            <geom class="collision" pos="-0.0648499 -0.032 0.018" quat="3.92687e-16 -1 -1.9186e-15 -6.38378e-16" mesh="motor_holder_so101_wrist_v1" material="3d_printed" />
+            <!-- 两组成对：【工具】。 -->
+
+            <!-- ★ 小臂末端电机壳：同上，【你删】了 collision。 -->
+            <geom class="visual" pos="-0.1224 0.0052 0.0187" quat="7.21645e-16 1.56949e-15 1 -3.33067e-16" mesh="sts3215_03a_v1" material="sts3215" />
+
+            <body name="wrist_link" pos="-0.1349 0.0052 3.62355e-17" quat="0.707388 0.0 0.0 -0.706825">
+              <!-- 【工具】。 -->
+
+              <joint axis="0 0 1" name="wrist_flex_joint" type="hinge" range="-1.6 1.6" class="sts3215" />
+              <!-- 结构【工具】，range【你改】±1.6，class【你填】。
+                   物理含义：±91.7°。
+                   项目里：释放冲突里差 64.7° 的就是它（真机 +63° vs 仿真 -2°）。
+                          log_gripper_rollout.py 会打它。 -->
+
+              <inertial pos="-0.000103312 -0.0386143 0.0281156" mass="0.096" fullinertia="4.47509e-05 3.08549e-05 2.5519e-05 2.17434e-08 -6.41776e-08 4.42475e-06" />
+              <!-- 【工具】。质量 0.096 kg。 -->
+
+              <geom class="visual" pos="8.32667e-17 -0.0424 0.0306" quat="0.5 0.5 0.5 -0.5" mesh="sts3215_03a_no_horn_v1" material="3d_printed" />
+              <geom class="collision" pos="8.32667e-17 -0.0424 0.0306" quat="0.5 0.5 0.5 -0.5" mesh="sts3215_03a_no_horn_v1" material="3d_printed" />
+              <geom class="visual" pos="0 -0.028 0.0181" quat="0.5 -0.5 -0.5 -0.5" mesh="wrist_roll_pitch_so101_v2" material="3d_printed" />
+              <geom class="collision" pos="0 -0.028 0.0181" quat="0.5 -0.5 -0.5 -0.5" mesh="wrist_roll_pitch_so101_v2" material="3d_printed" />
+              <!-- 两组成对：【工具】。 -->
+
+              <body name="gripper_link" pos="0.0 -0.0611 0.0181" quat="0.000563 -0.000563 0.707388 0.706825">
+                <!-- 【工具】。 -->
+
+                <joint axis="0 0 1" name="wrist_roll_joint" type="hinge" range="-3.1416 3.1416" class="sts3215" />
+                <!-- 结构【工具】；range 原 ±2.3 rad，【你改】成 ±π（真机 0~4095 counts=360°）。
+                     物理含义：±180°。
+                     项目里：roll=-90° 是 collect.py:307 常量，实测可用窗口 ±1°；
+                            compare_release_ab.py 对比 A/B 的 roll。 -->
+
+                <!-- wrist_camera：【你写】。跟着腕动，和 env 相机配对。
+                     项目里：renderer.update_scene(data, camera=wrist_cam_id) 出双相机视频。 -->
+                <camera name="wrist_camera" mode="fixed" fovy="30" pos="-0.000099 0.061885 -0.018949" xyaxes="0.999999 0.001592 -0.000001 -0.001424 0.894070 -0.447926" />
+
+                <inertial pos="0.000213627 0.000245138 -0.025187" mass="0.132" fullinertia="4.17373e-05 6.57962e-05 5.23538e-05 -5.08642e-07 -8.70168e-06 -7.85699e-08" />
+                <!-- 【工具】。质量 0.132 kg。 -->
+
+                <geom class="visual" pos="0.0077 0.0001 -0.0234" quat="0.707107 -0.707107 1.66015e-15 6.45094e-15" mesh="sts3215_03a_v1" material="sts3215" />
+                <geom class="collision" pos="0.0077 0.0001 -0.0234" quat="0.707107 -0.707107 1.66015e-15 6.45094e-15" mesh="sts3215_03a_v1" material="sts3215" contype="8" conaffinity="1" />
+                <!-- visual【工具】。collision 的 contype=8 conaffinity=1 是【你调】。
+                     物理含义：位掩码。bit3=8 表示“指壳组”，和通用件(bit0=1)碰，和指垫(bit2=4)不碰。
+                     项目里：m.geom_contype / m.geom_conaffinity 读；
+                            防止指垫和指壳自碰撞。 -->
+                <geom class="visual" pos="8.32667e-17 -0.000218214 0.000949706" quat="0 1 0 0" mesh="wrist_roll_follower_so101_v1" material="3d_printed" />
+                <geom class="collision" pos="8.32667e-17 -0.000218214 0.000949706" quat="0 1 0 0" mesh="wrist_roll_follower_so101_v1" material="3d_printed" contype="8" conaffinity="1" />
+                <!-- 同上：visual【工具】，位掩码【你调】。 -->
+
+                <!-- ★ 固定指指垫：【你写】。工具完全不会生成。
+                     物理含义：34x2x34 mm 平板，贴在药盒 +y 侧。
+                     位置按真实 TCP=23.57 mm 用 FK 反算，不是拍的。
+                     参数全部【你调】：
+                       condim=4：法向+2切向+1扭转摩擦。
+                       friction="1.2 0.01 0.0001"：(滑动μ, 扭转, 滚动)。
+                           μ=1.2 偏大（橡胶/TPU 量级），所以抓得稳。
+                       solref="0.02 1"：(timeconst, dampratio)。
+                           0.02 s 越小越硬；1=临界阻尼不振荡。
+                       solimp="0.9 0.95 0.001"：(dmin, dmax, width)。
+                           很硬的阻抗曲线，穿透被压到亚毫米。
+                       contype=4 conaffinity=2：只和药盒/通用件碰，不和指壳碰。
+                       rgba="0 0 0 0"：全透明，只做物理不渲染。
+                     项目里：probe_contact_audit.py 读 data.contact[i].dist 判 G1–G6；
+                            fn_grip 峰值 2.37 N 就是这个垫产生的。 -->
+                <geom name="pad_gripper_link" type="box" size="0.0250 0.0010 0.0200" pos="-0.001237 -0.000128 -0.091589" quat="0.741404 -0.318476 0.231482 0.543423" contype="4" conaffinity="2" condim="4" friction="1.2 0.01 0.0001" solref="0.02 1" solimp="0.9 0.95 0.001" rgba="0 0 0 0" />
+
+                <!-- gripperframe：【你写】。IK 的末端 site。
+                     项目里：site_id = mj_name2id(m, mjOBJ_SITE, "gripperframe")；
+                            data.site_xpos[site_id] 是末端世界坐标；
+                            mj_jacSite(m, d, J, None, site_id) 得 3×nv 平移雅可比；
+                            IK 残差 0.000923 m 就是拿它和目标比出来的。 -->
+                <site group="5" name="gripperframe" pos="-0.0079 -0.000218121 -0.0981274" quat="0.707107 -0 0.707107 -2.37788e-17" />
+
+                <body name="jaw_link" pos="0.0202 0.0188 -0.0234" quat="0.704244 0.704246 0.063554 -0.063554">
+                  <!-- 【工具】。 -->
+
+                  <joint axis="0 0 1" name="gripper_joint" type="hinge" range="0.0 2.232" class="sts3215" />
+                  <!-- 结构【工具】，range【你改】0~2.232，class【你填】。
+                       物理含义：夹爪开合。合爪约 0.28 rad（9.16 counts）。
+                       项目里：data.qpos 读；action 第 6 维就是它；
+                              export_lerobot.py 的 6 维 action 包含它。 -->
+
+                  <inertial pos="-0.00157495 -0.0300244 0.0192755" mass="0.014" fullinertia="7.71665e-06 2.20537e-06 6.16861e-06 -3.73108e-07 -6.8917e-09 -1.28269e-07" />
+                  <!-- 【工具】。质量 0.014 kg。 -->
+
+                  <geom class="visual" pos="-5.55112e-17 -5.55112e-17 0.0189" quat="1 -0 3.00524e-16 -2.00834e-17" mesh="moving_jaw_so101_v1" material="sts3215" />
+                  <geom class="collision" pos="-5.55112e-17 -5.55112e-17 0.0189" quat="1 -0 3.00524e-16 -2.00834e-17" mesh="moving_jaw_so101_v1" material="sts3215" contype="8" conaffinity="1" />
+                  <!-- visual【工具】；collision 位掩码【你调】，同腕部舵机壳。 -->
+
+                  <!-- ★ 活动指指垫（压头）：【你写】。参数全部【你调】。
+                       和固定指不同：活动指必须过压进药盒 0.4 mm，否则合到底也夹不到。
+                       实测两版就差这 1.6 mm。
+                       参数同固定指：condim=4 / friction 1.2 / solref 0.02 1 /
+                       solimp 0.9 0.95 0.001 / 不可见。
+                       项目里：probe_contact_audit.py 读它和药盒的 contact；
+                              fn_grip 峰值 2.37 N 主要是它压出来的。 -->
+                  <geom name="pad_jaw_link" type="box" size="0.0250 0.0010 0.0200" pos="-0.016348 -0.064197 0.021437" quat="0.309705 -0.721127 0.584713 0.205353" contype="4" conaffinity="2" condim="4" friction="1.2 0.01 0.0001" solref="0.02 1" solimp="0.9 0.95 0.001" rgba="0 0 0 0" />
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <!-- ================= actuator ================= -->
+
+  <actuator>
+    <position
+      class="sts3215"                     <!-- 【你填】 -->
+      name="shoulder_pan_joint"           <!-- 【工具】按 joint 自动生成 -->
+      joint="shoulder_pan_joint"          <!-- 【工具】 -->
+      forcerange="-3.35 3.35"             <!-- 【你填】STS3215 堵转扭矩 -->
+      ctrlrange="-1.91986 1.91986"        <!-- 【你填】和 joint range 一致 -->
+    />
+    <!-- position 执行器物理含义：
+         ctrl 是目标关节角（rad），不是力矩。
+         内部 PD：τ = kp*(ctrl-q) - kv*qdot，再被 forcerange 截断。
+         项目里：data.ctrl[i] = 目标角；mj_step 后 data.qpos 跟着变。 -->
+    <position class="sts3215" name="shoulder_lift_joint" joint="shoulder_lift_joint" forcerange="-3.35 3.35" ctrlrange="-1.74533 1.74533" />
+    <position class="sts3215" name="elbow_flex_joint" joint="elbow_flex_joint" forcerange="-3.35 3.35" ctrlrange="-1.69 1.54" />
+    <position class="sts3215" name="wrist_flex_joint" joint="wrist_flex_joint" forcerange="-3.35 3.35" ctrlrange="-1.6 1.6" />
+    <position class="sts3215" name="wrist_roll_joint" joint="wrist_roll_joint" forcerange="-3.35 3.35" ctrlrange="-3.1416 3.1416" />
+    <position class="sts3215" name="gripper_joint" joint="gripper_joint" forcerange="-3.35 3.35" ctrlrange="0.0 2.232" />
+    <!-- 6 个 name/joint 绑定：【工具】；class/forcerange/ctrlrange：【你填】。 -->
+  </actuator>
+
+  <!-- ================= contact exclude ================= -->
+
+  <contact>
+    <!-- 6 个 exclude：【工具】。相邻连杆不检测碰撞，防求解器打架。
+         项目里：这些对不会出现在 data.contact 里。 -->
+    <exclude body1="base_link" body2="shoulder_link" />
+    <exclude body1="shoulder_link" body2="upper_arm_link" />
+    <exclude body1="upper_arm_link" body2="lower_arm_link" />
+    <exclude body1="lower_arm_link" body2="wrist_link" />
+    <exclude body1="wrist_link" body2="gripper_link" />
+    <exclude body1="gripper_link" body2="jaw_link" />
+  </contact>
+</mujoco>

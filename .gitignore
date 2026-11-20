@@ -21,6 +21,13 @@ __pycache__/
 venv/
 *.bak
 
+# ===== RL 工作区（2026-11-20 起）=====
+# .venv-rl：mujoco + stable-baselines3 的隔离解释器，可重建（见 docs/HANDOFF_2026-11-20_residual_rl.md）
+/.venv-rl/
+# rl/ckpt：SAC 权重（每个 ~0.9 MB × seed），重建需 3×30k 步训练
+/rl/ckpt/
+/rl/runs/
+
 # ===== 兜底：任何漏网的大产物 =====
 *.npz
 *.mp4

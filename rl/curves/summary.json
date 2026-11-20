@@ -1,0 +1,46 @@
+{
+ "runs": [
+  {
+   "seed": 0,
+   "base": "sim156",
+   "steps": 30000,
+   "n_episodes": 171,
+   "reward_head_mean": -299.474,
+   "reward_tail_mean": -246.101,
+   "wall_s": 566.0,
+   "ckpt": "/home/yyl/deepseek-harness/rl/ckpt/s0/model.zip",
+   "curve": "/home/yyl/deepseek-harness/rl/curves/s0.jsonl",
+   "ratio": 0.822,
+   "head_n": 42,
+   "tail_n": 42
+  },
+  {
+   "seed": 1,
+   "base": "sim156",
+   "steps": 30000,
+   "n_episodes": 172,
+   "reward_head_mean": -289.268,
+   "reward_tail_mean": -264.606,
+   "wall_s": 579.0,
+   "ckpt": "/home/yyl/deepseek-harness/rl/ckpt/s1/model.zip",
+   "curve": "/home/yyl/deepseek-harness/rl/curves/s1.jsonl",
+   "ratio": 0.915,
+   "head_n": 43,
+   "tail_n": 43
+  },
+  {
+   "seed": 2,
+   "base": "sim156",
+   "steps": 30000,
+   "n_episodes": 171,
+   "reward_head_mean": -285.468,
+   "reward_tail_mean": -249.364,
+   "wall_s": 565.5,
+   "ckpt": "/home/yyl/deepseek-harness/rl/ckpt/s2/model.zip",
+   "curve": "/home/yyl/deepseek-harness/rl/curves/s2.jsonl",
+   "ratio": 0.874,
+   "head_n": 42,
+   "tail_n": 42
+  }
+ ]
+}
