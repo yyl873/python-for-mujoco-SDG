@@ -66,7 +66,8 @@ class ResidualSO101(gym.Env):
                  episode_pool=(0,), scripts=None, randomize: bool = True,
                  residual_deg: float = RESIDUAL_DEG, seed: int = 0,
                  width: int = 640, height: int = 480,
-                 reward_version: str = "v1", judge: str = "legacy"):
+                 reward_version: str = "v1", judge: str = "legacy",
+                 pen_gate_mm: float = 20.8):
         super().__init__()
         import mujoco                                    # noqa: PLC0415
         import test_render as R                          # noqa: PLC0415
@@ -92,9 +93,13 @@ class ResidualSO101(gym.Env):
         # reward_version: "v1" = spec §6.2 原表（绝对距离）；"v2" = 抗作弊版（进展差分 + 洁净项）
         # judge: "legacy" = 旧的成功/失败判定（峰值抬升 / 只看倾角）；
         #        "strict" = 连续 5 步洁净成功 + 掉桌/出区判失败（罚 -30），用于堵住"撞翻早退"作弊
-        assert reward_version in ("v1", "v2"), reward_version
+        assert reward_version in ("v1", "v2", "v2b"), reward_version
         assert judge in ("legacy", "strict"), judge
         self.reward_version = reward_version
+        # 抓取奖励的穿透门槛：取基座在 110 条 episode 上的 p90（14.2 中位数 / 20.8 p90）。
+        # ★ 不能用脚本专家的 0.5 mm —— 实测 ACT 基座每条都压 10–22 mm，用 0.5 会让抓取奖励恒为 0
+        #   （这正是 v2 那版训练失败的隐藏原因之一：grasp 项被掐死，只剩进展项和惩罚项）。
+        self.pen_gate_mm = float(pen_gate_mm)
         self.judge = judge
         self._prev_dist = 0.0
         self._lift_streak = 0
@@ -183,16 +188,24 @@ class ResidualSO101(gym.Env):
             split["lift"] = 2.0 * float(np.tanh(rise / 50.0))   # rise 单位 mm
             split["pen"] = -1.0 if pen_mm > 0.5 else 0.0
             split["act"] = 0.0
-        else:                                            # v2
-            clean = (n_con >= 2 and lift_mm > 5.0 and pen_mm <= 0.5 and tilt <= 15.0)
-            split["progress"] = (0.0 if pen_mm > 0.5
-                                 else 200.0 * (self._prev_dist - dist))
-            split["grasp"] = 0.5 if clean else 0.0
+        else:                                            # v2 / v2b
+            clean = (n_con >= 2 and lift_mm > 5.0
+                     and pen_mm <= self.pen_gate_mm and tilt <= 15.0)
+            if self.reward_version == "v2":
+                # v2 实测更差（18.9% vs v1 32.2%）：穿模罚 −3/步 ≫ 抓取奖 +0.5/步，
+                # 策略学会"别碰盒子"。保留此版本用于复现那次失败。
+                w_prog, w_grasp, w_pen = 200.0, 0.5, -3.0
+            else:
+                # v2b：把三项量级拉回同一数量级（抓取 ≥ 穿模），并降低进展项权重
+                w_prog, w_grasp, w_pen = 100.0, 1.5, -0.5
+            split["progress"] = (0.0 if pen_mm > 0.5 else w_prog * (self._prev_dist - dist))
+            split["grasp"] = w_grasp if clean else 0.0
             split["lift"] = 3.0 * float(np.tanh(rise / 20.0))   # rise 单位 mm，2 cm 饱和
-            split["pen"] = -3.0 if pen_mm > 0.5 else 0.0
+            split["pen"] = w_pen if pen_mm > 0.5 else 0.0
             split["act"] = -0.02 * float(np.linalg.norm(np.asarray(a, float)))
+            split["weights"] = (w_prog, w_grasp, w_pen)
 
-        r = float(sum(split.values()))
+        r = float(sum(v for k, v in split.items() if k != "weights"))
         split["total"] = round(r, 6)
         return r, split
 
@@ -243,6 +256,8 @@ class ResidualSO101(gym.Env):
         self._tcp_box_min = 1e9
         self._prev_dist = float(np.linalg.norm(self.arm.tcp_pos() - self._obj0))
         self._lift_streak = 0
+        self._ep_return = 0.0          # ★ 自己记 episode 回报（VecNormalize 会吃掉 info["episode"]）
+        self._ep_success = False
         return self._obs(), dict(episode_id=eid, task=self._task)
 
     def step(self, action):
@@ -320,6 +335,12 @@ class ResidualSO101(gym.Env):
                           (-10.0 if (self.judge != "strict" and fail) else 0.0))
         rsplit["total"] = round(float(reward), 6)
 
+        self._ep_return += float(reward)
+        self._ep_success = bool(self._ep_success or success)
+        if terminated or truncated:
+            info_ep = dict(ep_end_return=round(self._ep_return, 3),
+                           ep_end_success=self._ep_success)
+
         info = dict(lift_mm=lift_mm, max_lift_mm=float(self._max_lift),
                     hdisp_mm=hdisp_mm, contact_n=n_con, penetration_mm=pen_mm,
                     box_tilt_deg=tilt, success=success, episode_id=self._episode_id,
@@ -328,6 +349,8 @@ class ResidualSO101(gym.Env):
                     judge=self.judge, reward_version=self.reward_version,
                     reward_split=rsplit,
                     act_il_deg=action_il.tolist(), act_res_deg=a.tolist())
+        if terminated or truncated:
+            info.update(info_ep)        # 训练曲线用：本集原始回报 + 是否成功
         return self._obs(), float(reward), terminated, truncated, info
 
     def close(self):
@@ -350,7 +373,7 @@ def _selftest(argv=None) -> int:
     ap.add_argument("--episodes", default="0")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--no-randomize", action="store_true")
-    ap.add_argument("--reward", default="v1", choices=["v1", "v2"])
+    ap.add_argument("--reward", default="v1", choices=["v1", "v2", "v2b"])
     ap.add_argument("--judge", default="legacy", choices=["legacy", "strict"])
     ap.add_argument("--split", action="store_true", help="逐步打印奖励分项（调试用）")
     a = ap.parse_args(argv)

@@ -55,16 +55,20 @@ def main(argv=None) -> int:
     ap.add_argument("--residual-deg", type=float, default=None,
                     help="残差动作空间上限（度）；默认按 env 的 RESIDUAL_DEG(5.73°)，"
                          "幅度扫描后建议改成平台值（例如 1.43）")
-    ap.add_argument("--reward", default="v1", choices=["v1", "v2"],
+    ap.add_argument("--reward", default="v1", choices=["v1", "v2", "v2b"],
                     help="奖励版本：v1=spec §6.2 原表；v2=抗作弊版（进展差分等）")
     ap.add_argument("--judge", default="legacy", choices=["legacy", "strict"],
                     help="成败判定：legacy=旧（峰值抬升/只看倾角）；strict=连续5步洁净成功+掉桌判失败")
+    ap.add_argument("--vecnorm-reward", action="store_true",
+                    help="用 VecNormalize 只归一化回报（不动观测）：v1/v2 的回报量级差 3 倍，"
+                         "归一化后 SAC/PPO 都更稳。norm_obs=False → 评测可直接用模型")
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--log-every", type=int, default=1000)
     a = ap.parse_args(argv)
 
     from stable_baselines3 import SAC                            # noqa: PLC0415
     from stable_baselines3.common.callbacks import BaseCallback   # noqa: PLC0415
+    from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize  # noqa: PLC0415
     from env_residual import ResidualSO101, RESIDUAL_DEG          # noqa: PLC0415
 
     pool = []
@@ -91,11 +95,17 @@ def main(argv=None) -> int:
             infos = self.locals.get("infos", []) or []
             dones = self.locals.get("dones", None)
             for i, info in enumerate(infos):
-                if "episode" not in info:
+                # ★ VecNormalize 包住 DummyVecEnv 后不会再插 info["episode"]（那要靠 VecMonitor），
+                #   所以优先读 env 自己在集末写入的原始回报 ep_end_return。
+                if "ep_end_return" in info:
+                    ep_r = float(info["ep_end_return"])
+                    ep_success = bool(info.get("ep_end_success"))
+                elif "episode" in info:
+                    ep_r = float(info["episode"]["r"])
+                    is_done = bool(dones[i]) if dones is not None else True
+                    ep_success = bool(info.get("success")) if is_done else None
+                else:
                     continue
-                ep_r = float(info["episode"]["r"])
-                is_done = bool(dones[i]) if dones is not None else True
-                ep_success = bool(info.get("success")) if is_done else None
                 self.ep_rewards.append(ep_r)
                 self.ep_success.append(ep_success)
                 rec = dict(step=int(self.num_timesteps), ep_reward=ep_r,
@@ -114,13 +124,25 @@ def main(argv=None) -> int:
                                           else float(a.residual_deg)),
                             reward_version=a.reward, judge=a.judge)
         model_path = ck_dir / f"s{seed}" / "model.zip"
+        vn_path = ck_dir / f"s{seed}" / "vecnormalize.pkl"
         curve = cv_dir / f"s{seed}.jsonl"
         model_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # ★ 只归一化回报（观测已手工缩放过：state/100、rel 米、vel×10、n_con/4、t_norm）
+        train_env = DummyVecEnv([lambda: env])
+        if a.vecnorm_reward:
+            if a.resume and vn_path.exists():
+                train_env = VecNormalize.load(str(vn_path), train_env)
+                train_env.training = True
+            else:
+                train_env = VecNormalize(train_env, norm_obs=False, norm_reward=True,
+                                         clip_reward=10.0, gamma=0.99)
+
         if a.resume and model_path.exists():
-            model = SAC.load(str(model_path), env=env, device=a.device)
+            model = SAC.load(str(model_path), env=train_env, device=a.device)
             done_steps = int(model.num_timesteps)
         else:
-            model = SAC("MlpPolicy", env, verbose=0, seed=seed,
+            model = SAC("MlpPolicy", train_env, verbose=0, seed=seed,
                         learning_rate=a.learning_rate, batch_size=a.batch_size,
                         device=a.device, buffer_size=200_000,
                         train_freq=1, gradient_steps=1,
@@ -137,6 +159,8 @@ def main(argv=None) -> int:
             model.learn(total_timesteps=remain, callback=CurveCB(curve, a.log_every),
                         reset_num_timesteps=False, progress_bar=False)
             model.save(str(model_path))
+            if a.vecnorm_reward:
+                train_env.save(str(vn_path))
         env.close()
 
         rewards, succ_flags = [], []
@@ -153,6 +177,7 @@ def main(argv=None) -> int:
         tail = rewards[-q:]
         rec = dict(seed=seed, base=a.base, steps=int(model.num_timesteps),
                    residual_deg=round(float(env.residual_deg), 3), reward=a.reward, judge=a.judge,
+                   vecnorm_reward=bool(a.vecnorm_reward),
                    pool=f"{pool[0]}-{pool[-1]}" if pool else "",
                    n_episodes=len(rewards),
                    reward_head_mean=round(float(sum(head) / max(1, len(head))), 3),
@@ -189,6 +214,9 @@ def main(argv=None) -> int:
     succs = [r["success_tail"] for r in summary if r.get("success_tail") is not None]
     ok = bool(imps) and float(sum(imps) / len(imps)) >= 0.2
     print(f"\n  S2 判据（负 reward 用相对改善，不用 tail/head 比）：")
+    if not imps:
+        print("    （episode 太少，算不出相对改善——smoke 跑时正常）")
+        return 1
     print(f"    相对改善 {imps}  均值 {sum(imps)/len(imps):.3f}  (需 ≥0.20)")
     print(f"    训练期成功率(末四分位) {succs}")
     print(f"    → {'ok' if ok else 'warn（未达 0.20，按 plan §阶段2 查 reward/缩放/episode 长度，不许调奖励量级）'}")
