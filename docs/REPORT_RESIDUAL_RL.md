@@ -768,3 +768,46 @@ bash -c 'for S in 1001 1002; do /home/yyl/miniforge3/envs/lerobot312/bin/lerobot
 env -u PYTHONHOME -u PYTHONPATH MPLCONFIGDIR=$PWD/.mplcache \
     .venv-rl/bin/python rl/ft_eval_sweep.py
 ```
+
+### 15.7 在 MuJoCo 里直接看：微调到底改了什么（录像 + 失败模式）
+
+录像（左=基座 sim156，右=微调 10 000 步，同一 episode 同一 seed）：
+
+| 文件 | 内容 |
+|---|---|
+| `rl/eval/videos/compare_ep103.mp4` | 基座撞翻（抬升 1.6 mm / 倾角 74.9°）→ 微调**干净成功**（71.9 mm / 14.0°） |
+| `rl/eval/videos/compare_ep108.mp4` | 基座撞翻（1.1 mm / 69.9°）→ 微调**抬起到 127.0 mm 但搬出工作区**（横移 122.3 mm） |
+| `rl/eval/videos/compare_ep119.mp4` | 基座撞翻（8.5 mm / 53.6°）→ 微调**抬到 139.4 mm 但搬出工作区**（横移 120.7 mm） |
+| `rl/eval/videos/ep{103,105,108,111,119}_{base,ft}.mp4` | 上面对应的单臂原片 |
+
+逐条对照（这些是单条 rollout 的真实数字，不是聚合）：
+
+| episode | 基座 | 微调 10k |
+|---|---|---|
+| 103 | ❌ fell，抬升 1.6 mm，倾角 74.9° | ✅ **clean 成功**，抬升 71.9 mm，倾角 14.0° |
+| 105 | ✅ clean，77.0 mm | ✅ 成功但 clean=0（倾角 15.3°，刚好过了 15° 线） |
+| 108 | ❌ fell，1.1 mm，69.9° | ❌ **out_of_area**，抬升 **127.0 mm**，横移 122.3 mm |
+| 111 | ✅ clean，66.6 mm | ✅ clean，68.8 mm |
+| 119 | ❌ fell，8.5 mm，53.6° | ❌ **out_of_area**，抬升 **139.4 mm**，横移 120.7 mm |
+
+**这解释清楚了 §15.2 的"变差"是什么**：微调并没有让模型变笨，而是**把失败模式从"抓不起来→撞翻(fell)"
+换成了"抓起来了→搬出工作区(out_of_area)"**。用 90 次评测的结束原因分布对照（同批 episode/seed）：
+
+| 臂 | fell | out_of_area | success | timeout | 抬升 ≥100 mm 的条数 | 抬升中位 |
+|---|---|---|---|---|---|---|
+| 基座 | 45 (50%) | 29 (32%) | 12 (13%) | 4 (4%) | 29 (32%) | 4.5 mm |
+| 微调 10k | 45 (50%) | **35 (39%)** | **8 (9%)** | 2 (2%) | **35 (39%)** | 3.1 mm |
+
+净效果是**约 4 条成功被换成了"搬出工作区"**，抬升 ≥100 mm 的条数从 29 涨到 35 ——
+这与 §15.4 的假设 1 正好对上：纠正标签 `ref` 在漂移状态上主要是"**继续搬运**"的指令，
+把它当监督信号等于教 ACT"抓到了就继续往前走"，于是横移越界。
+
+⚠️ **一个必须知道的复现性缺陷（本次发现，尚未修）**：`rl/eval_ab.py` 里传感器噪声的 seed 是从
+`env.reset(seed=s)` 之后**递进的 RNG** 里抽的（`env_residual.reset` 里的
+`self.base.reset(task, seed=int(self._rng.integers(...)))`，且 `run_episode` 内部又 reset 了一次），
+所以**同一个 (episode, seed) 的 rollout 结果依赖遍历顺序**：单独跑一条 episode 复现不出
+90 次评测里那一行（实测 ep105：90 次评测里微调是 1.2 mm 失手，单独跑是 73 mm 成功）。
+- 影响：同一批 `--episodes/--seeds` 的两臂**配对比较仍然有效**（顺序一致）；
+- 但不能拿"单独跑一条"的录像去论证表里的某一行；
+- 修法：把传感器 seed 从 `(episode_id, seed)` 确定性派生（如 `hash((eid, s)) % 2**31`），
+  并让 `run_episode` 显式接收 seed。改完要重跑基线，所以本报告暂时保留旧口径并在此声明。
