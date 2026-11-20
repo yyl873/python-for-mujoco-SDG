@@ -307,6 +307,10 @@ def main(argv=None) -> int:
               f"{r['clean']:>4}/{r['n']:<4}  {mc['ft_only']:>7}/{mc['base_only']:<7} "
               f"{mc['p']:>8.4f}")
     print()
+    if "base_clean_rate" not in sumry:          # 还没有任何可用 ckpt（扫描空转）
+        print(f"  基座      : {sumry.get('n_base')} 次 rollout 已就绪，但还没有可评的 ckpt")
+        print(f"  汇总      : {a.summary}")
+        return 0
     print(f"  基座      : success {sumry['base_success_rate']:.1%}  "
           f"clean {sumry['base_clean_rate']:.1%}  "
           f"Wilson [{sumry['base_clean_wilson'][0]:.1f}, {sumry['base_clean_wilson'][1]:.1f}]")

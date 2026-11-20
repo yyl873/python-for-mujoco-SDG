@@ -1,0 +1,98 @@
+{
+ "base_json": "/home/yyl/deepseek-harness/rl/eval/ab_base_90.json",
+ "episodes": "100-129",
+ "eval_seeds": 3,
+ "judge": "strict",
+ "summary": {
+  "n_base": 90,
+  "base_success": 12,
+  "base_clean": 10,
+  "verdict": "no_data"
+ },
+ "variants": [
+  {
+   "seed": 1000,
+   "step": 2500,
+   "path": "/home/yyl/deepseek-harness/rl/eval/ft/s1000_2500.json",
+   "ckpt": "/home/yyl/lerobot/outputs/train/act_dagger_ft_1000/checkpoints/002500/pretrained_model",
+   "missing": true
+  },
+  {
+   "seed": 1000,
+   "step": 5000,
+   "path": "/home/yyl/deepseek-harness/rl/eval/ft/s1000_5000.json",
+   "ckpt": "/home/yyl/lerobot/outputs/train/act_dagger_ft_1000/checkpoints/005000/pretrained_model",
+   "missing": true
+  },
+  {
+   "seed": 1000,
+   "step": 7500,
+   "path": "/home/yyl/deepseek-harness/rl/eval/ft/s1000_7500.json",
+   "ckpt": "/home/yyl/lerobot/outputs/train/act_dagger_ft_1000/checkpoints/007500/pretrained_model",
+   "missing": true
+  },
+  {
+   "seed": 1000,
+   "step": 10000,
+   "path": "/home/yyl/deepseek-harness/rl/eval/ft/s1000_10000.json",
+   "ckpt": "/home/yyl/lerobot/outputs/train/act_dagger_ft_1000/checkpoints/010000/pretrained_model",
+   "missing": true
+  },
+  {
+   "seed": 1001,
+   "step": 2500,
+   "path": "/home/yyl/deepseek-harness/rl/eval/ft/s1001_2500.json",
+   "ckpt": "/home/yyl/lerobot/outputs/train/act_dagger_ft_1001/checkpoints/002500/pretrained_model",
+   "missing": true
+  },
+  {
+   "seed": 1001,
+   "step": 5000,
+   "path": "/home/yyl/deepseek-harness/rl/eval/ft/s1001_5000.json",
+   "ckpt": "/home/yyl/lerobot/outputs/train/act_dagger_ft_1001/checkpoints/005000/pretrained_model",
+   "missing": true
+  },
+  {
+   "seed": 1001,
+   "step": 7500,
+   "path": "/home/yyl/deepseek-harness/rl/eval/ft/s1001_7500.json",
+   "ckpt": "/home/yyl/lerobot/outputs/train/act_dagger_ft_1001/checkpoints/007500/pretrained_model",
+   "missing": true
+  },
+  {
+   "seed": 1001,
+   "step": 10000,
+   "path": "/home/yyl/deepseek-harness/rl/eval/ft/s1001_10000.json",
+   "ckpt": "/home/yyl/lerobot/outputs/train/act_dagger_ft_1001/checkpoints/010000/pretrained_model",
+   "missing": true
+  },
+  {
+   "seed": 1002,
+   "step": 2500,
+   "path": "/home/yyl/deepseek-harness/rl/eval/ft/s1002_2500.json",
+   "ckpt": "/home/yyl/lerobot/outputs/train/act_dagger_ft_1002/checkpoints/002500/pretrained_model",
+   "missing": true
+  },
+  {
+   "seed": 1002,
+   "step": 5000,
+   "path": "/home/yyl/deepseek-harness/rl/eval/ft/s1002_5000.json",
+   "ckpt": "/home/yyl/lerobot/outputs/train/act_dagger_ft_1002/checkpoints/005000/pretrained_model",
+   "missing": true
+  },
+  {
+   "seed": 1002,
+   "step": 7500,
+   "path": "/home/yyl/deepseek-harness/rl/eval/ft/s1002_7500.json",
+   "ckpt": "/home/yyl/lerobot/outputs/train/act_dagger_ft_1002/checkpoints/007500/pretrained_model",
+   "missing": true
+  },
+  {
+   "seed": 1002,
+   "step": 10000,
+   "path": "/home/yyl/deepseek-harness/rl/eval/ft/s1002_10000.json",
+   "ckpt": "/home/yyl/lerobot/outputs/train/act_dagger_ft_1002/checkpoints/010000/pretrained_model",
+   "missing": true
+  }
+ ]
+}
