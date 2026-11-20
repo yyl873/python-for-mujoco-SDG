@@ -1,0 +1,59 @@
+{
+ "base": "sim156",
+ "episodes": "106-111",
+ "candidates": 6,
+ "horizon": 15,
+ "chunk": 15,
+ "n_decisions": 79,
+ "gain_mean": 0.426,
+ "gain_median": 0.0,
+ "gain_p90": 0.639,
+ "frac_gain_gt2mm": 0.065,
+ "frac_gain_le0": 0.805,
+ "lift_abs_median": 0.0,
+ "wall_s": 20.3,
+ "n_episodes_done": 12,
+ "n_success": 2,
+ "oracle": {
+  "n": 6,
+  "n_success": 2,
+  "rows": [
+   {
+    "episode_id": 106,
+    "success": true,
+    "lift_mm": 50.04,
+    "applied": 14
+   },
+   {
+    "episode_id": 107,
+    "success": false,
+    "lift_mm": 0.57,
+    "applied": 13
+   },
+   {
+    "episode_id": 108,
+    "success": false,
+    "lift_mm": 6.67,
+    "applied": 13
+   },
+   {
+    "episode_id": 109,
+    "success": false,
+    "lift_mm": 0.62,
+    "applied": 11
+   },
+   {
+    "episode_id": 110,
+    "success": true,
+    "lift_mm": 51.91,
+    "applied": 14
+   },
+   {
+    "episode_id": 111,
+    "success": false,
+    "lift_mm": 2.76,
+    "applied": 14
+   }
+  ]
+ }
+}
