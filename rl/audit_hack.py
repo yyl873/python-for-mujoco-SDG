@@ -75,6 +75,7 @@ def main(argv=None) -> int:
     ap.add_argument("--pen-gate", type=float, default=20.8,
                     help="穿透门槛(mm)：取基座在 110 条 episode 上的 p90=20.8，"
                          "而不是脚本专家的 0.5mm（后者对学习型策略不可达）")
+    ap.add_argument("--fig", default=None, help="输出成功率 vs 洁净成功率对比图（png）")
     ap.add_argument("--out", default=str(ROOT / "rl" / "eval" / "hack_audit.json"))
     a = ap.parse_args(argv)
 
@@ -140,6 +141,36 @@ def main(argv=None) -> int:
         else:
             print("  ✅ 无脏成功、早退率未劣化")
 
+    # ---- 可选出图：成功率 vs 洁净成功率（两张柱并排，一眼看出"涨的是水还是肉"）----
+    if a.fig:
+        import matplotlib                                        # noqa: PLC0415
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt                          # noqa: PLC0415
+        import numpy as np                                       # noqa: PLC0415
+        plt.rcParams["font.sans-serif"] = ["Noto Sans CJK SC", "DejaVu Sans"]
+        plt.rcParams["axes.unicode_minus"] = False
+        arms = [k for k in report["totals"] if report["totals"][k].get("n")]
+        succ = [report["totals"][k]["success_rate"] * 100 for k in arms]
+        clean = [report["totals"][k]["clean_success_rate"] * 100 for k in arms]
+        xs = np.arange(len(arms))
+        fig, ax = plt.subplots(figsize=(7.2, 4.4), dpi=160)
+        ax.bar(xs - 0.19, succ, width=0.36, color="#95a5a6", label="成功率（旧口径）")
+        ax.bar(xs + 0.19, clean, width=0.36, color="#c0392b", label="洁净成功率（审计口径）")
+        for x, sv, cv in zip(xs, succ, clean):
+            ax.text(x - 0.19, sv + 1, f"{sv:.1f}%", ha="center", fontsize=8.5)
+            ax.text(x + 0.19, cv + 1, f"{cv:.1f}%", ha="center", fontsize=8.5)
+        ax.set_xticks(xs)
+        ax.set_xticklabels(arms, fontsize=9.5)
+        ax.set_ylabel("闭环成功率 (%)", fontsize=10)
+        ax.set_title("残差 RL 的“提升”有多少是脏成功\n（洁净 = 非深压盒 / 不歪盒 / 抬升连续 5 步）",
+                     fontsize=10.5)
+        ax.legend(fontsize=9)
+        ax.grid(axis="y", alpha=0.25, linestyle=":")
+        fig.tight_layout()
+        fp = Path(a.fig)
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(fp)
+        print(f"  图 → {fp}")
     op = Path(a.out)
     op.parent.mkdir(parents=True, exist_ok=True)
     op.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")

@@ -225,8 +225,7 @@ def main(argv=None) -> int:
             for eid in pool:
                 for s in range(a.seeds):
                     if (tag, int(eid), int(s)) in done_rows:
-                        rows.append(done_rows[(tag, int(eid), int(s))])
-                        continue
+                        continue        # 已在 rows 里预置，别再 append（否则续跑会让结果翻倍）
                     vid = None
                     if a.video and tag == a.video_tag and eid == pool[0] and s == 0:
                         vid = a.video
