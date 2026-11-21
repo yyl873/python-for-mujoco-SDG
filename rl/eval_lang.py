@@ -101,6 +101,88 @@ def load_task_order(ds: Path | None, fallback: list[str]) -> list[str]:
     return fallback
 
 
+def _onehot(ix: int, n_instr: int) -> np.ndarray:
+    v = np.zeros(n_instr, dtype=np.float32)
+    v[ix] = 1.0
+    return v
+
+
+def _rollout(a, eid: int, seed: int, instr: str, ix: int, n_instr: int) -> dict:
+    """跑一条 rollout（本进程内）。返回该条的记录。"""
+    from env_residual import ResidualSO101                       # noqa: PLC0415
+
+    env = ResidualSO101(base_name=a.ckpt, episode_pool=(eid,),
+                        max_seconds=a.max_seconds, judge="target",
+                        jaw_min_deg=a.jaw_min_deg,
+                        instr_onehot=(None if a.no_instr else _onehot(ix, n_instr)),
+                        device=a.device, seed=seed)
+    try:
+        env.episode_pool = (eid,)
+        obs, info = env.reset(seed=seed)
+        n = 0
+        for _ in range(int(round(env.max_seconds * env.control_hz))):
+            obs, r, term, trunc, info = env.step(np.zeros(6, np.float64))
+            n += 1
+            if term or trunc:
+                break
+        pos = np.asarray(env.d.qpos[env.arm.oadr:env.arm.oadr + 3], float)
+        box = classify_box(pos)
+        return dict(episode_id=eid, seed=seed, instr=instr, ix=ix,
+                    landed_box=box, end_pos=[round(float(v), 5) for v in pos],
+                    steps=n, wall_s=None)
+    finally:
+        env.close()
+
+
+def _spawn_rollout(a, eid: int, seed: int, ix: int, n_instr: int,
+                   instr: str) -> dict | None:
+    """起一个子进程跑一条 rollout。
+
+    为什么必须隔离：`mujoco.mj_step` 在本机会偶发 **SIGFPE（"浮点异常"，rc=136）**，
+    位置随机（本机实测过死在 `env` 构造期的 settle 段里，也死在 rollout 中途），
+    进程级、Python 侧捕不住。不隔离的话一次崩溃就把整轮 76 条评测带走。
+    子进程里崩 = 这一条没结果，父进程重试（物理确定性，重试通常就过）。
+    """
+    import subprocess                                            # noqa: PLC0415
+    import tempfile                                              # noqa: PLC0415
+
+    fd, tmp = tempfile.mkstemp(prefix="dsh_rollout_", suffix=".json")
+    import os                                                    # noqa: PLC0415
+    os.close(fd)
+    cmd = [sys.executable, str(Path(__file__).resolve()),
+           "--ckpt", a.ckpt, "--rollout", f"{eid},{seed},{ix}",
+           "--n-instr", str(n_instr), "--max-seconds", str(a.max_seconds),
+           "--jaw-min-deg", str(a.jaw_min_deg), "--device", a.device,
+           "--task-a", a.task_a, "--task-b", a.task_b,
+           "--out", tmp]
+    if a.no_instr:
+        cmd.append("--no-instr")
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True,
+                           timeout=a.max_seconds + 600)
+        if p.returncode != 0:
+            return None
+        row = json.loads(Path(tmp).read_text(encoding="utf-8"))
+        row["instr"] = instr
+        return row
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+        return None
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+
+
+def _child_main(a) -> int:
+    """子进程入口：只跑 `--rollout eid,seed,ix` 这一条，把记录写到 `--out`。"""
+    eid, seed, ix = (int(x) for x in a.rollout.split(","))
+    n_instr = a.n_instr or 2
+    order = [a.task_a, a.task_b]
+    instr = order[ix % len(order)]
+    row = _rollout(a, eid, seed, instr, ix, n_instr)
+    Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+    Path(a.out).write_text(json.dumps(row, ensure_ascii=False), encoding="utf-8")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="语言条件 ACT 的反事实评测")
     ap.add_argument("--ckpt", required=True,
@@ -124,7 +206,18 @@ def main(argv=None) -> int:
                     help="控制组：不给指令向量（state 仍 6 维，可用于验证评测框架本身，"
                          "例如用 sim156 基座跑一遍，预期它只会放进一个箱子 → follow≈50%）")
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--inproc", action="store_true",
+                    help="不隔离子进程（调试用）。默认**每条 rollout 起一个子进程**："
+                         "mj_step 偶发 SIGFPE/SIGSEGV 会带走整个进程，隔离后只丢那一条")
+    ap.add_argument("--crash-retries", type=int, default=3,
+                    help="同一条 rollout 崩溃后最多重试几次（物理确定性，重试通常就过）")
+    ap.add_argument("--rollout", default=None,
+                    help="内部用：子进程只跑一条，格式 eid,seed,ix")
+    ap.add_argument("--n-instr", type=int, default=None, help="内部用：one-hot 维数")
     a = ap.parse_args(argv)
+
+    if a.rollout:                                   # ★ 子进程模式：只跑一条 rollout
+        return _child_main(a)
 
     from base_policy import ACTBase                              # noqa: PLC0415
     from env_residual import ResidualSO101                       # noqa: PLC0415
@@ -179,28 +272,11 @@ def main(argv=None) -> int:
         except Exception:                                        # noqa: BLE001
             rows, done = [], set()
 
-    def run_one(eid: int, seed: int, instr: str, ix: int) -> dict:
-        env = ResidualSO101(base_name=a.ckpt, episode_pool=(eid,),
-                            max_seconds=a.max_seconds, judge="target",
-                            jaw_min_deg=a.jaw_min_deg,
-                            instr_onehot=(None if a.no_instr else onehot(ix)),
-                            device=a.device, seed=seed)
-        try:
-            env.episode_pool = (eid,)
-            obs, info = env.reset(seed=seed)
-            n = 0
-            for _ in range(int(round(env.max_seconds * env.control_hz))):
-                obs, r, term, trunc, info = env.step(np.zeros(6, np.float64))
-                n += 1
-                if term or trunc:
-                    break
-            pos = np.asarray(env.d.qpos[env.arm.oadr:env.arm.oadr + 3], float)
-            box = classify_box(pos)
-            return dict(episode_id=eid, seed=seed, instr=instr, ix=ix,
-                        landed_box=box, end_pos=[round(float(v), 5) for v in pos],
-                        steps=n, wall_s=None)
-        finally:
-            env.close()
+    def run_one(eid: int, seed: int, instr: str, ix: int) -> dict | None:
+        """跑一条 rollout。a.inproc 时在本进程跑；否则起子进程（崩了只丢这一条）。"""
+        if a.inproc:
+            return _rollout(a, eid, seed, instr, ix, n_instr)
+        return _spawn_rollout(a, eid, seed, ix, n_instr, instr)
 
     t0 = time.time()
     for eid in pool:
@@ -208,11 +284,25 @@ def main(argv=None) -> int:
             for instr, ix in ((a.task_a, ix_a), (a.task_b, ix_b)):
                 if (eid, sd, instr) in done:
                     continue
-                rec = run_one(eid, sd, instr, ix)
+                rec = None
+                for try_i in range(1, a.crash_retries + 1):
+                    rec = run_one(eid, sd, instr, ix)
+                    if rec is not None:
+                        if try_i > 1:
+                            print(f"     （第 {try_i} 次尝试才跑通）", flush=True)
+                        break
+                    print(f"  ep{eid} s{sd} {instr[-18:]!r} 进程崩溃（SIGFPE/SIGSEGV），"
+                          f"重试 {try_i}/{a.crash_retries}", flush=True)
+                if rec is None:                       # 连续崩 → 记为 crashed，继续下一条
+                    rec = dict(episode_id=eid, seed=sd, instr=instr, ix=ix,
+                               landed_box=None, end_pos=None, steps=0, crashed=True)
+                    print(f"  ep{eid} s{sd} {instr[-18:]!r} → 连续 {a.crash_retries} 次崩溃，"
+                          f"记 crashed（不计入 follow，计入 ITT 分母）", flush=True)
                 rec["wall_s"] = round(time.time() - t0, 1)
                 rows.append(rec)
-                print(f"  ep{eid} s{sd}  {instr[-18:]!r:22s} → 落在 {rec['landed_box']}  "
-                      f"({rec['steps']} 步)", flush=True)
+                if not rec.get("crashed"):
+                    print(f"  ep{eid} s{sd}  {instr[-18:]!r:22s} → 落在 {rec['landed_box']}  "
+                          f"({rec['steps']} 步)", flush=True)
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 out_path.write_text(json.dumps(
                     dict(ckpt=a.ckpt, task_order=order, task_a=a.task_a, task_b=a.task_b,
@@ -239,6 +329,7 @@ def main(argv=None) -> int:
 
     summary = dict(
         n_rollouts=len(rows), n_landed_in_some_box=n,
+        n_crashed=sum(1 for r in rows if r.get("crashed")),
         follow_correct=k, follow_acc=round(k / n, 4) if n else None,
         follow_acc_itt=round(k / len(rows), 4) if rows else None,
         follow_wilson=[round(lo, 4), round(hi, 4)],

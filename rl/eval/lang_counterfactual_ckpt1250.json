@@ -1,0 +1,1090 @@
+{
+ "ckpt": "/home/yyl/lerobot/outputs/train/act_lang_dual/checkpoints/last/pretrained_model",
+ "task_order": [
+  "Put the medicine box into the left wooden box.",
+  "Put the medicine box into the right wooden box."
+ ],
+ "task_a": "Put the medicine box into the left wooden box.",
+ "task_b": "Put the medicine box into the right wooden box.",
+ "box_a": "target_box",
+ "box_b": "target_box_b",
+ "summary": {
+  "n_rollouts": 76,
+  "n_landed_in_some_box": 49,
+  "n_crashed": 2,
+  "follow_correct": 27,
+  "follow_acc": 0.551,
+  "follow_acc_itt": 0.3553,
+  "follow_wilson": [
+   0.4131,
+   0.6815
+  ],
+  "binom_p_vs_chance": 0.56817,
+  "n_pairs": 38,
+  "pairs_both_follow": 0,
+  "pairs_any_landed": 27,
+  "neither_rate": 0.3553,
+  "verdict": "语言未被使用（≈抛硬币）",
+  "wall_s": 467.2
+ },
+ "rows": [
+  {
+   "episode_id": 2400,
+   "seed": 0,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.26778,
+    -0.13592,
+    0.02839
+   ],
+   "steps": 344,
+   "wall_s": 7.0
+  },
+  {
+   "episode_id": 2400,
+   "seed": 0,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.26837,
+    -0.13922,
+    0.02807
+   ],
+   "steps": 350,
+   "wall_s": 8.5
+  },
+  {
+   "episode_id": 2400,
+   "seed": 1,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.18951,
+    0.24126,
+    0.02975
+   ],
+   "steps": 442,
+   "wall_s": 10.3
+  },
+  {
+   "episode_id": 2400,
+   "seed": 1,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.19761,
+    0.24635,
+    0.04496
+   ],
+   "steps": 442,
+   "wall_s": 12.1
+  },
+  {
+   "episode_id": 2401,
+   "seed": 0,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.20832,
+    0.23641,
+    0.02979
+   ],
+   "steps": 442,
+   "wall_s": 13.9
+  },
+  {
+   "episode_id": 2401,
+   "seed": 0,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.19697,
+    0.2394,
+    0.02979
+   ],
+   "steps": 442,
+   "wall_s": 15.6
+  },
+  {
+   "episode_id": 2401,
+   "seed": 1,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.19489,
+    0.2176,
+    0.02975
+   ],
+   "steps": 442,
+   "wall_s": 6.2
+  },
+  {
+   "episode_id": 2401,
+   "seed": 1,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.18636,
+    0.22877,
+    0.02975
+   ],
+   "steps": 442,
+   "wall_s": 12.5
+  },
+  {
+   "episode_id": 2402,
+   "seed": 0,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": null,
+   "end_pos": [
+    0.32541,
+    0.05025,
+    0.00425
+   ],
+   "steps": 210,
+   "wall_s": 17.9
+  },
+  {
+   "episode_id": 2402,
+   "seed": 0,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": null,
+   "end_pos": [
+    0.35742,
+    0.10064,
+    0.0024
+   ],
+   "steps": 206,
+   "wall_s": 26.0
+  },
+  {
+   "episode_id": 2402,
+   "seed": 1,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": null,
+   "end_pos": [
+    0.26189,
+    0.14694,
+    0.02774
+   ],
+   "steps": 442,
+   "wall_s": 32.4
+  },
+  {
+   "episode_id": 2402,
+   "seed": 1,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": null,
+   "end_pos": [
+    0.22221,
+    0.19432,
+    0.04845
+   ],
+   "steps": 442,
+   "wall_s": 38.8
+  },
+  {
+   "episode_id": 2403,
+   "seed": 0,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.27423,
+    -0.14705,
+    0.02728
+   ],
+   "steps": 346,
+   "wall_s": 44.8
+  },
+  {
+   "episode_id": 2403,
+   "seed": 0,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.27396,
+    -0.14379,
+    0.02724
+   ],
+   "steps": 361,
+   "wall_s": 54.9
+  },
+  {
+   "episode_id": 2403,
+   "seed": 1,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": null,
+   "end_pos": [
+    0.28264,
+    0.12831,
+    0.02775
+   ],
+   "steps": 442,
+   "wall_s": 61.3
+  },
+  {
+   "episode_id": 2403,
+   "seed": 1,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": null,
+   "end_pos": [
+    0.28264,
+    0.12831,
+    0.02775
+   ],
+   "steps": 442,
+   "wall_s": 67.6
+  },
+  {
+   "episode_id": 2404,
+   "seed": 0,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": null,
+   "end_pos": [
+    0.3208,
+    0.0542,
+    0.0035
+   ],
+   "steps": 145,
+   "wall_s": 76.9
+  },
+  {
+   "episode_id": 2404,
+   "seed": 0,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": null,
+   "end_pos": [
+    0.32052,
+    0.05577,
+    0.00697
+   ],
+   "steps": 146,
+   "wall_s": 82.0
+  },
+  {
+   "episode_id": 2404,
+   "seed": 1,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": null,
+   "end_pos": [
+    0.30687,
+    0.13115,
+    0.02775
+   ],
+   "steps": 442,
+   "wall_s": 88.3
+  },
+  {
+   "episode_id": 2404,
+   "seed": 1,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": null,
+   "end_pos": [
+    0.30687,
+    0.13115,
+    0.02775
+   ],
+   "steps": 442,
+   "wall_s": 94.6
+  },
+  {
+   "episode_id": 2405,
+   "seed": 0,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.27481,
+    -0.14498,
+    0.02781
+   ],
+   "steps": 319,
+   "wall_s": 100.6
+  },
+  {
+   "episode_id": 2405,
+   "seed": 0,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.27174,
+    -0.13752,
+    0.02843
+   ],
+   "steps": 330,
+   "wall_s": 106.5
+  },
+  {
+   "episode_id": 2405,
+   "seed": 1,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.20482,
+    0.20777,
+    0.02975
+   ],
+   "steps": 442,
+   "wall_s": 112.9
+  },
+  {
+   "episode_id": 2405,
+   "seed": 1,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.19867,
+    0.21436,
+    0.02975
+   ],
+   "steps": 442,
+   "wall_s": 119.3
+  },
+  {
+   "episode_id": 2406,
+   "seed": 0,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.20648,
+    0.23828,
+    0.02979
+   ],
+   "steps": 442,
+   "wall_s": 125.7
+  },
+  {
+   "episode_id": 2406,
+   "seed": 0,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.21716,
+    0.23468,
+    0.02979
+   ],
+   "steps": 442,
+   "wall_s": 132.1
+  },
+  {
+   "episode_id": 2406,
+   "seed": 1,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.18718,
+    0.21017,
+    0.02975
+   ],
+   "steps": 442,
+   "wall_s": 138.5
+  },
+  {
+   "episode_id": 2406,
+   "seed": 1,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.18598,
+    0.22778,
+    0.02975
+   ],
+   "steps": 442,
+   "wall_s": 145.0
+  },
+  {
+   "episode_id": 2407,
+   "seed": 0,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.26731,
+    -0.14066,
+    0.02792
+   ],
+   "steps": 346,
+   "wall_s": 151.0
+  },
+  {
+   "episode_id": 2407,
+   "seed": 0,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.26921,
+    -0.14048,
+    0.02741
+   ],
+   "steps": 358,
+   "wall_s": 156.9
+  },
+  {
+   "episode_id": 2407,
+   "seed": 1,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.27073,
+    -0.14048,
+    0.02736
+   ],
+   "steps": 363,
+   "wall_s": 162.8
+  },
+  {
+   "episode_id": 2407,
+   "seed": 1,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.2661,
+    -0.14142,
+    0.02807
+   ],
+   "steps": 385,
+   "wall_s": 168.9
+  },
+  {
+   "episode_id": 2408,
+   "seed": 0,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.28616,
+    -0.15172,
+    0.02708
+   ],
+   "steps": 364,
+   "wall_s": 180.4
+  },
+  {
+   "episode_id": 2408,
+   "seed": 0,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": null,
+   "end_pos": [
+    0.3121,
+    0.03861,
+    0.00697
+   ],
+   "steps": 413,
+   "wall_s": 186.9
+  },
+  {
+   "episode_id": 2408,
+   "seed": 1,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.3003,
+    -0.1113,
+    0.00945
+   ],
+   "steps": 384,
+   "wall_s": 192.9
+  },
+  {
+   "episode_id": 2408,
+   "seed": 1,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": null,
+   "end_pos": [
+    0.33673,
+    -0.0323,
+    0.01773
+   ],
+   "steps": 442,
+   "wall_s": 199.3
+  },
+  {
+   "episode_id": 2409,
+   "seed": 0,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.26912,
+    -0.14164,
+    0.02815
+   ],
+   "steps": 346,
+   "wall_s": 205.3
+  },
+  {
+   "episode_id": 2409,
+   "seed": 0,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.27212,
+    -0.14383,
+    0.02853
+   ],
+   "steps": 348,
+   "wall_s": 211.2
+  },
+  {
+   "episode_id": 2409,
+   "seed": 1,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.26688,
+    -0.1288,
+    0.02726
+   ],
+   "steps": 347,
+   "wall_s": 217.2
+  },
+  {
+   "episode_id": 2409,
+   "seed": 1,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.26368,
+    -0.13224,
+    0.02731
+   ],
+   "steps": 346,
+   "wall_s": 223.2
+  },
+  {
+   "episode_id": 2411,
+   "seed": 0,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": null,
+   "end_pos": [
+    0.35182,
+    0.03516,
+    0.00769
+   ],
+   "steps": 246,
+   "wall_s": 228.7
+  },
+  {
+   "episode_id": 2411,
+   "seed": 0,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": null,
+   "end_pos": [
+    0.35095,
+    0.03789,
+    0.00291
+   ],
+   "steps": 246,
+   "wall_s": 234.3
+  },
+  {
+   "episode_id": 2411,
+   "seed": 1,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.20176,
+    0.23689,
+    0.02975
+   ],
+   "steps": 442,
+   "wall_s": 240.7
+  },
+  {
+   "episode_id": 2411,
+   "seed": 1,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.18391,
+    0.22329,
+    0.02975
+   ],
+   "steps": 442,
+   "wall_s": 247.1
+  },
+  {
+   "episode_id": 2412,
+   "seed": 0,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.20404,
+    0.23344,
+    0.02979
+   ],
+   "steps": 442,
+   "wall_s": 253.4
+  },
+  {
+   "episode_id": 2412,
+   "seed": 0,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.19361,
+    0.24454,
+    0.02979
+   ],
+   "steps": 442,
+   "wall_s": 262.5
+  },
+  {
+   "episode_id": 2412,
+   "seed": 1,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": null,
+   "end_pos": [
+    0.30462,
+    0.08344,
+    0.00176
+   ],
+   "steps": 142,
+   "wall_s": 267.5
+  },
+  {
+   "episode_id": 2412,
+   "seed": 1,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": null,
+   "end_pos": [
+    0.3046,
+    0.08356,
+    0.00179
+   ],
+   "steps": 142,
+   "wall_s": 272.6
+  },
+  {
+   "episode_id": 2413,
+   "seed": 0,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.27745,
+    -0.14849,
+    0.02761
+   ],
+   "steps": 343,
+   "wall_s": 278.6
+  },
+  {
+   "episode_id": 2413,
+   "seed": 0,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.27914,
+    -0.14687,
+    0.02849
+   ],
+   "steps": 354,
+   "wall_s": 284.5
+  },
+  {
+   "episode_id": 2413,
+   "seed": 1,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.27435,
+    -0.13933,
+    0.02754
+   ],
+   "steps": 336,
+   "wall_s": 293.2
+  },
+  {
+   "episode_id": 2413,
+   "seed": 1,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.27122,
+    -0.13878,
+    0.02745
+   ],
+   "steps": 341,
+   "wall_s": 299.1
+  },
+  {
+   "episode_id": 2414,
+   "seed": 0,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": null,
+   "end_pos": [
+    0.36168,
+    0.07647,
+    0.00142
+   ],
+   "steps": 204,
+   "wall_s": 304.5
+  },
+  {
+   "episode_id": 2414,
+   "seed": 0,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": null,
+   "end_pos": [
+    0.3277,
+    0.06642,
+    0.0017
+   ],
+   "steps": 202,
+   "wall_s": 310.0
+  },
+  {
+   "episode_id": 2414,
+   "seed": 1,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.26574,
+    -0.13211,
+    0.0274
+   ],
+   "steps": 341,
+   "wall_s": 316.0
+  },
+  {
+   "episode_id": 2414,
+   "seed": 1,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.26916,
+    -0.13247,
+    0.02802
+   ],
+   "steps": 345,
+   "wall_s": 322.0
+  },
+  {
+   "episode_id": 2415,
+   "seed": 0,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.19741,
+    0.25605,
+    0.02402
+   ],
+   "steps": 442,
+   "wall_s": 328.4
+  },
+  {
+   "episode_id": 2415,
+   "seed": 0,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.19666,
+    0.24769,
+    0.02979
+   ],
+   "steps": 442,
+   "wall_s": 334.8
+  },
+  {
+   "episode_id": 2415,
+   "seed": 1,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": null,
+   "end_pos": [
+    0.33973,
+    0.056,
+    0.00587
+   ],
+   "steps": 144,
+   "wall_s": 339.8
+  },
+  {
+   "episode_id": 2415,
+   "seed": 1,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": null,
+   "end_pos": [
+    0.33839,
+    0.06456,
+    0.00517
+   ],
+   "steps": 144,
+   "wall_s": 344.8
+  },
+  {
+   "episode_id": 2416,
+   "seed": 0,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": null,
+   "end_pos": [
+    0.3508,
+    0.04881,
+    0.0046
+   ],
+   "steps": 146,
+   "wall_s": 350.0
+  },
+  {
+   "episode_id": 2416,
+   "seed": 0,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.19351,
+    0.24749,
+    0.02979
+   ],
+   "steps": 442,
+   "wall_s": 356.3
+  },
+  {
+   "episode_id": 2416,
+   "seed": 1,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": null,
+   "end_pos": [
+    0.32675,
+    0.16026,
+    0.00509
+   ],
+   "steps": 147,
+   "wall_s": 361.0
+  },
+  {
+   "episode_id": 2416,
+   "seed": 1,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": null,
+   "end_pos": [
+    0.32698,
+    0.15957,
+    0.00639
+   ],
+   "steps": 145,
+   "wall_s": 365.7
+  },
+  {
+   "episode_id": 2417,
+   "seed": 0,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.2765,
+    -0.14734,
+    0.02723
+   ],
+   "steps": 348,
+   "wall_s": 371.2
+  },
+  {
+   "episode_id": 2417,
+   "seed": 0,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.27479,
+    -0.14564,
+    0.02852
+   ],
+   "steps": 356,
+   "wall_s": 376.8
+  },
+  {
+   "episode_id": 2417,
+   "seed": 1,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": null,
+   "end_pos": null,
+   "steps": 0,
+   "crashed": true,
+   "wall_s": 386.3
+  },
+  {
+   "episode_id": 2417,
+   "seed": 1,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.22194,
+    0.19854,
+    0.02975
+   ],
+   "steps": 442,
+   "wall_s": 396.1
+  },
+  {
+   "episode_id": 2418,
+   "seed": 0,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.26098,
+    -0.15998,
+    0.02852
+   ],
+   "steps": 346,
+   "wall_s": 407.9
+  },
+  {
+   "episode_id": 2418,
+   "seed": 0,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.26875,
+    -0.16038,
+    0.02861
+   ],
+   "steps": 354,
+   "wall_s": 413.3
+  },
+  {
+   "episode_id": 2418,
+   "seed": 1,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box",
+   "end_pos": [
+    0.2731,
+    -0.13737,
+    0.02857
+   ],
+   "steps": 360,
+   "wall_s": 418.9
+  },
+  {
+   "episode_id": 2418,
+   "seed": 1,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": null,
+   "end_pos": null,
+   "steps": 0,
+   "crashed": true,
+   "wall_s": 432.0
+  },
+  {
+   "episode_id": 2419,
+   "seed": 0,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.18444,
+    0.23648,
+    0.02979
+   ],
+   "steps": 442,
+   "wall_s": 437.8
+  },
+  {
+   "episode_id": 2419,
+   "seed": 0,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "end_pos": [
+    0.19098,
+    0.22763,
+    0.03973
+   ],
+   "steps": 442,
+   "wall_s": 450.2
+  },
+  {
+   "episode_id": 2419,
+   "seed": 1,
+   "instr": "Put the medicine box into the left wooden box.",
+   "ix": 0,
+   "landed_box": null,
+   "end_pos": [
+    0.31832,
+    0.14803,
+    0.00444
+   ],
+   "steps": 179,
+   "wall_s": 462.5
+  },
+  {
+   "episode_id": 2419,
+   "seed": 1,
+   "instr": "Put the medicine box into the right wooden box.",
+   "ix": 1,
+   "landed_box": null,
+   "end_pos": [
+    0.31855,
+    0.14841,
+    0.00368
+   ],
+   "steps": 178,
+   "wall_s": 467.2
+  }
+ ]
+}

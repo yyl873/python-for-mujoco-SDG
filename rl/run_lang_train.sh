@@ -2,32 +2,34 @@
 # 语言条件 ACT 微调：基座 act_sim156_lang8（state 已加宽 6→8）-> 在双指令数据上微调
 #
 # 前置：
-#   1) rl/lang_ds/v1 已导出（92 条 / 41922 帧 / state 8 维 / 两个 instruction）
+#   1) rl/lang_ds/v1 或 v1_h264 已导出（92 条 / 41922 帧 / state 8 维 / 两个 instruction）
 #   2) rl/widen_state.py 已生成 /home/yyl/lerobot/outputs/train/act_sim156_lang8/pretrained_model
-#      （state 的 6->8 是**补 0 列**，新增维度在权重上的贡献初始为 0）
+#      （state 的 6->8 是**补 0 列**；★ 它只能当权重初始化，不能直接推理：
+#       policy_preprocessor.json 里 normalizer 仍是 6 维，直接跑会报 tensor 8 vs 6）
 #
-# ★ 必须在能看到 /dev/nvidia* 的终端跑（沙箱默认看不到显卡，lerobot 会静默降级到 CPU：
-#   batch 8 在 CPU 上 6.5~8 s/step，5000 步要 9~11 小时）。GPU 实测 ~2.87 step/s。
+# ★ 必须在能看到 /dev/nvidia* 的终端跑（沙箱看不到显卡，lerobot 会静默降级到 CPU：
+#   batch 8 在 CPU 上 6.0~6.5 s/step，5000 步 ≈ 8.5 小时）。GPU 实测 ~2.87 step/s ≈ 30 min。
 #
-# ★★ 2026-11-21 第一次正式跑的崩溃记录（别重复踩）：
-#   GPU 上跑到 **839/5000 步（4:59，2.87 step/s）段错误 rc=139（核心已转储）**，
-#   此前 loss 正常（l1 0.109 / kld 0.002），退出时 resource_tracker 报 20 个泄漏信号量
-#   → 死在 dataloader worker 侧。而当时 `save_freq` 是 1000，**一步 ckpt 都没落**。
-#   头号嫌疑：数据集视频是 **AV1(libdav1d)**，4 个 worker × prefetch 4 并发解码；
-#   本机 AV1 栈已有前科——`collect/export_lerobot.py` 里记着 svt-av1 **编码** 92 条时
-#   也段错误 rc=139，而历史上训练成功的 `dagger_v1` 是 **h264**。
-#   对策（按顺序试）：
-#     ⓿ 续跑参数：lerobot 0.6.2 单独给 `--resume=true` 会 ValueError（要求同时给
-#        `--config_path=<output_dir>/checkpoints/last/pretrained_model/train_config.json`）；
-#        脚本里已带，本机验过 6 步 → 12 步真续跑。
-#     ① WORKERS=0                 —— 解码退回主进程，绕开 worker
-#     ② DS_ROOT=rl/lang_ds/v1_h264 —— 换 h264 数据集（导出脚本加 --vcodec h264）
-#     ③ SAVE_FREQ 默认从 1000 降到 250：崩了最多丢 1.5 分钟，且脚本自动 --resume 续跑
+# ★★ 崩溃记录（别重复踩）：
+#   2026-11-21 第一次：AV1 数据集 + 4 worker，跑到 **839/5000 步** 段错误 rc=139，
+#     当时 save_freq=1000 → 一步 ckpt 都没落。退出时 resource_tracker 报 20 个泄漏信号量
+#     → 死在 dataloader worker 侧。
+#   2026-11-21 第二次：h264 数据集 + 4 worker，仍然 rc=139，但这次 save_freq=250 →
+#     三次 attempt 分别推进到 ~1000 / 1250 / **1473 步**，ckpt 落 001000、001250（不白跑）。
+#     → 段错误**与视频编码无关**，是本机 dataloader/torch 栈的既有问题；结论：
+#       **不指望它不崩，而是让它崩了能续、并且自动降档**。
+#   对策（本脚本已自动执行，无需手改命令）：
+#     ⓿ 续跑参数：`--resume=true` 必须配 `--config_path=<out>/checkpoints/last/pretrained_model/
+#        train_config.json`（lerobot 0.6.2 的硬要求；只给 --resume 会 ValueError）。
+#        本机验过 6 步 → 12 步真续跑。SAVE_FREQ 默认 250，崩了最多丢 ~1.5 分钟。
+#     ① 同一档连续崩 3 次 → 自动切 `--num_workers=0`（彻底没有 worker 进程）
+#     ② 再连续崩 3 次 → 自动再切 `--dataset.video_backend=pyav`
+#     ATTEMPTS 默认 60：即使每 300 步崩一次，也能靠续跑磨到 5000 步。
 #
 # 用法：
-#   STEPS=5000 bash rl/run_lang_train.sh                              # 默认 4 worker
-#   WORKERS=0  STEPS=5000 bash rl/run_lang_train.sh                    # 崩了先试这个
-#   DS_ROOT=$PWD/rl/lang_ds/v1_h264 STEPS=5000 bash rl/run_lang_train.sh   # 还崩就换 h264
+#   DS_ROOT=$PWD/rl/lang_ds/v1_h264 STEPS=5000 bash rl/run_lang_train.sh
+#   ATTEMPTS=200 ...                     # 想更硬地磨
+#   WORKERS=0 BACKEND=pyav ...           # 想直接从最低档开始
 set -u
 cd "$(dirname "$0")/.." || exit 1
 export HF_HOME=$PWD/.cache/huggingface OMP_NUM_THREADS=8
@@ -38,37 +40,54 @@ SEED="${SEED:-1000}"
 BATCH="${BATCH:-8}"
 WORKERS="${WORKERS:-4}"
 SAVE_FREQ="${SAVE_FREQ:-250}"
-ATTEMPTS="${ATTEMPTS:-3}"
+ATTEMPTS="${ATTEMPTS:-60}"
+ESCALATE_AFTER="${ESCALATE_AFTER:-3}"
 OUT="${OUT:-/home/yyl/lerobot/outputs/train/act_lang_dual}"
 DS_ROOT="${DS_ROOT:-$PWD/rl/lang_ds/v1}"
 BASE="${BASE:-/home/yyl/lerobot/outputs/train/act_sim156_lang8/pretrained_model}"
-# 解码后端：lerobot 默认 torchcodec（本机 AV1 走 libdav1d）；BACKEND=pyav 可换 pyav 解码
+# 解码后端：lerobot 默认 torchcodec；BACKEND=pyav 可换 pyav 解码（降档第 2 级用）
 BACKEND="${BACKEND:-}"
 
 for p in "$DS_ROOT" "$BASE"; do
   [ -e "$p" ] || { echo "缺依赖: $p" >&2; exit 2; }
 done
 
+step_now() {  # 目前最新 ckpt 的步数（读不到就 0）
+  env -u PYTHONHOME -u PYTHONPATH /usr/bin/python3 -c "
+import json,glob
+best=0
+for p in glob.glob('$OUT/checkpoints/*/training_state/training_step.json'):
+    try: best=max(best,int(json.load(open(p)).get('step',0)))
+    except Exception: pass
+print(best)" 2>/dev/null || echo 0
+}
+
 echo "=== 语言条件 ACT 微调 ==="
 echo "  数据集: $DS_ROOT"
 echo "  基座  : $BASE"
-echo "  步数  : $STEPS（batch $BATCH, seed $SEED, workers $WORKERS, save_freq $SAVE_FREQ）"
+echo "  步数  : $STEPS（batch $BATCH, seed $SEED, save_freq $SAVE_FREQ）"
+echo "  已训  : $(step_now) 步（有 ckpt 就自动续跑）"
 echo "  输出  : $OUT"
+echo "  重试  : 最多 $ATTEMPTS 次；每档连续崩 $ESCALATE_AFTER 次自动降档"
 echo
 
+stage=0            # 0=配置原样  1=num_workers=0  2=num_workers=0 + pyav
+fails_here=0
 rc=1
 for attempt in $(seq 1 "$ATTEMPTS"); do
+  case "$stage" in
+    0) W="$WORKERS"; B="$BACKEND" ;;
+    1) W=0;          B="$BACKEND" ;;
+    *) W=0;          B="pyav" ;;
+  esac
+
   RESUME=()
-  # 上一次已经落了 ckpt 就接着跑。
-  # ★★ 2026-11-21 实测：`--resume=true` **单独用会直接 ValueError** —— lerobot 0.6.2 的
-  #   `_resolve_resume_checkpoint()` 要求同时给 `--config_path` 指向上次的 train_config.json，
-  #   否则 `rc=1`、一步都续不上（这条原本会让"崩溃自动续跑"完全失效，等于白留 3 次重试）。
-  #   正确写法已在本机验过：跑 6 步落 000006 → 续跑改成 12 步 → 新增 000009/000012，未从头重训。
   if [ -e "$OUT/checkpoints/last/pretrained_model/train_config.json" ]; then
     RESUME=(--resume=true
             --config_path="$OUT/checkpoints/last/pretrained_model/train_config.json")
   fi
-  echo "=== attempt $attempt/$ATTEMPTS  $(date +%H:%M:%S)  resume=${RESUME[*]:-no} ==="
+  echo "=== attempt $attempt/$ATTEMPTS 档$stage(workers=$W backend=${B:-默认}) 已训=$(step_now)步" \
+       " $(date +%H:%M:%S) resume=${RESUME[*]:-no} ==="
 
   env -u PYTHONHOME -u PYTHONPATH "$PY" \
     --dataset.repo_id=local/v1 \
@@ -78,19 +97,33 @@ for attempt in $(seq 1 "$ATTEMPTS"); do
     --policy.pretrained_path="$BASE" \
     --policy.push_to_hub=false --save_checkpoint_to_hub=false \
     --batch_size="$BATCH" --steps="$STEPS" --save_freq="$SAVE_FREQ" \
-    --num_workers="$WORKERS" ${BACKEND:+--dataset.video_backend="$BACKEND"} \
+    --num_workers="$W" ${B:+--dataset.video_backend="$B"} \
     --output_dir="$OUT" --seed="$SEED" "${RESUME[@]}"
   rc=$?
-  echo "=== attempt $attempt rc=$rc  $(date +%H:%M:%S) ==="
+  echo "=== attempt $attempt rc=$rc 已训=$(step_now)步  $(date +%H:%M:%S) ==="
   [ "$rc" -eq 0 ] && break
-  if [ "$rc" -eq 139 ]; then
-    echo "段错误（139）。若这是 attempt 1：改用 WORKERS=0 重跑；"
-    echo "  仍是 139 就说明与 worker 解码无关 → 换 DS_ROOT=\$PWD/rl/lang_ds/v1_h264 再试。"
+
+  # 崩溃（139 SIGSEGV / 136 SIGFPE）→ 计数并决定是否降档；其它错误直接放弃（多半是参数/依赖）
+  if [ "$rc" -eq 139 ] || [ "$rc" -eq 136 ]; then
+    fails_here=$((fails_here + 1))
+    echo "  崩溃 rc=$rc（第 $fails_here/$ESCALATE_AFTER 次），已落 ckpt 会自动续跑"
+    if [ "$fails_here" -ge "$ESCALATE_AFTER" ] && [ "$stage" -lt 2 ]; then
+      stage=$((stage + 1))
+      fails_here=0
+      echo "  ⤵ 降档到 档$stage"
+    fi
+  else
+    echo "  非崩溃错误（rc=$rc），不重试；看上面的 traceback"
+    break
   fi
   sleep 5
 done
 
 echo
-echo "TRAIN_DONE rc=$rc  output=$OUT  ($(date +%H:%M:%S))"
+echo "TRAIN_DONE rc=$rc  已训=$(step_now)/$STEPS 步  output=$OUT  ($(date +%H:%M:%S))"
+if [ "$(step_now)" -lt "$STEPS" ]; then
+  echo "★ 没跑满：再执行同一条命令会从最近 ckpt 继续（不会从头重训）。"
+  echo "  若每次都停在同一位置，把那次的 attempt 日志尾部发我。"
+fi
 ls "$OUT/checkpoints" 2>/dev/null | tail -3
 exit $rc
