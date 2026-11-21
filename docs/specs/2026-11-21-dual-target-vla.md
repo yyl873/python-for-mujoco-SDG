@@ -309,3 +309,27 @@ ckpt 落了 `001000`、`001250`。→ 结论：**不再指望它不崩**，改�
 
 → 1250 步只有 5000 步的 1/4，「语言没生效」符合欠训练预期，**不能当结论**；
 结果留档 `rl/eval/lang_counterfactual_ckpt1250.json`，正式结果等 5000 步 ckpt 用同一条命令重跑。
+
+### 11.3 第三轮：崩溃换了一种类型（CUDA 内部断言，不是 SIGSEGV）
+
+| 项 | 实测 |
+|---|---|
+| 症状 | 续跑到 **step 55/3750**，进度条卡在同一步约 **20 s**（速度 2.93 → 1.19 step/s），随后 `RuntimeError: d.is_cuda() INTERNAL ASSERT FAILED at "c10/cuda/impl/CUDAGuardImpl.h:34"`（rc=1，有 traceback，在 `accelerator.backward(loss)` 里） |
+| 与 139 的区别 | 前几次是**无 traceback 的段错误**（worker 侧、20 个泄漏信号量）；这次是 autograd backward 的 C++ 断言，且**先卡 20 s 再报错** |
+| 已排除 | 续跑配置本身正常：`train_config.json` 里 `policy.device=cuda`、`batch_size=8`、`num_workers=4`、`seed=1000`、`steps=5000`；数据侧在 CPU 上连取 400 batch（h264 / AV1 各一轮）都不崩 |
+| 剩下两种可能 | ① **驱动/供电面**：GPU 卡死后回到驱动层（`dmesg` 找 Xid）；② **torch 轮子面**：`2.7.1+cu126` 对本机 **sm_120（RTX 5060 Laptop）**覆盖不全，某个 backward 算子落到错误设备 |
+
+**新增 `rl/probe_gpu_health.py`（判读工具，1~2 分钟，只碰显卡、不碰数据集和 dataloader）**：
+A 段纯 matmul + backward；B 段用真 ckpt 跑 ACT 前向 + backward（batch 8，与训练同 shape）。
+
+| 结果 | 结论 | 下一步 |
+|---|---|---|
+| A 段就炸 | 显卡/驱动面 | `dmesg \| tail -30 \| grep -iE 'xid\|reset'`、`nvidia-smi -q \| grep -iE 'xid\|throttle'` 的尾部贴回来 |
+| A 过、B 炸 | torch/lerobot 算子面 | `CUDA_LAUNCH_BLOCKING=1` 复跑定位算子；仍崩就换 cu128 及以上的 torch 轮子（对 sm_120 支持更全） |
+| A、B 都过 | 计算面没问题 | 嫌疑落在 dataloader worker / 视频解码 → 用 `WORKERS=0` 跑训练 |
+
+```bash
+cd /home/yyl/deepseek-harness
+env -u PYTHONHOME -u PYTHONPATH /home/yyl/miniforge3/envs/lerobot312/bin/python \
+    rl/probe_gpu_health.py --steps 200
+```
