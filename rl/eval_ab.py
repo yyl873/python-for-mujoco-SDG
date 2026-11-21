@@ -269,6 +269,8 @@ def main(argv=None) -> int:
     out = dict(base=a.base, policy=a.policy, episodes=a.episodes, seeds=a.seeds,
                judge=a.judge, reward=a.reward, base_from=a.base_from,
                res_scale=a.res_scale,
+               # 口径溯源：阈值/钳制值跟着结果一起落盘，否则事后无法判断 clean_success 是哪个口径写的
+               clean_finger_mm=a.clean_finger_mm, jaw_min_deg=a.jaw_min_deg,
                results={k: {kk: vv for kk, vv in v.items() if kk != "rows"}
                         for k, v in results.items()},
                detail=results)
