@@ -237,9 +237,19 @@ def main(argv=None) -> int:
                 keep = ~np.isin(phase, list(drop))
                 if keep.sum() == 0:
                     raise RuntimeError(f"--drop-phases {sorted(drop)} 把这条整条删空了")
+            # ★ 2026-11-21：每条 episode 带自己的 instruction（per-episode task）。
+            #   以前这里只记一个全库 task，双任务数据集会被打成同一个标签。
+            ep_task = None
+            try:
+                js = src / f"ep_{eid:06d}.json"
+                if js.exists():
+                    ep_task = json.loads(js.read_text(encoding="utf-8")).get("instruction")
+            except Exception:                              # noqa: BLE001
+                ep_task = None
             plan.append(dict(eid=eid, state=state[keep], action=action[keep],
                              env=env_abs, wrist=wrist_abs, keep=keep,
-                             n=int(keep.sum())))
+                             n=int(keep.sum()),
+                             task=(ep_task or task)))
             n_frames += int(keep.sum())
         except Exception as exc:                       # noqa: BLE001
             problems.append(f"ep_{eid:06d}: {exc}")
@@ -289,13 +299,14 @@ def main(argv=None) -> int:
             raise SystemExit(f"ep_{item['eid']:06d} 视频帧数 env={len(env_fr)} "
                              f"wrist={len(wrist_fr)} 与轨迹 {len(item['keep'])} 不一致")
         idx = np.where(item["keep"])[0]
+        ep_task = item.get("task") or task
         for j, k in enumerate(idx):
             ds.add_frame({
                 "observation.state": item["state"][j].astype(np.float32),
                 "action": item["action"][j].astype(np.float32),
                 IMG_KEYS["env"]: env_fr[k],
                 IMG_KEYS["wrist"]: wrist_fr[k],
-                "task": task,
+                "task": ep_task,
             })
         ds.save_episode()
         done += 1
@@ -313,7 +324,9 @@ def main(argv=None) -> int:
         source_schema_version=index.get("schema_version"),
         source_index_sha=None,
         n_episodes=done, n_frames=int(n_frames),
-        units=args.units, joints=JOINTS, task=task,
+        units=args.units, joints=JOINTS,
+        tasks=sorted({str(i.get("task") or task) for i in plan}),
+        task_default=task,
         gripper_space=args.gripper_space,
         jaw_open_deg=float(args.jaw_open_deg),
         gripper_full=float(args.gripper_full),
