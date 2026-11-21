@@ -1007,6 +1007,10 @@ env -u PYTHONHOME -u PYTHONPATH MUJOCO_GL=egl LP_NUM_THREADS=8 .venv-rl/bin/pyth
 产物：rl/eval/target_R{1,2,3}_s{0,1,2}_clamp_90.json，汇总 rl/eval/clamp_sweep.json
 复算：env -u PYTHONHOME -u PYTHONPATH python3 rl/clamp_analysis.py --pat "target_R*_s*_clamp_90.json"
 耗时：每臂约 13 min（3 路并发，OMP_NUM_THREADS=1，合计约 40 min）
+
+> 注：R1 那三份 json 由**先于该次代码改动启动的进程**写出，因此里面**没有**
+> `clean_finger_mm` / `jaw_min_deg` 这两个溯源字段（R2/R3 六份都有，值 = 13.26 / 16.05）。
+> R1 的实际取值由上面那条命令行唯一确定，与其它六份一致；这是本批实验里唯一的元数据不一致，如实记录。
 ```
 
 ### 18.2 结果（clean 统一 13.26 mm 重算；配对基准 = 同一批 rollout 的基座+钳爪）
