@@ -72,13 +72,26 @@ def main(argv=None) -> int:
     ap.add_argument("--horizon", type=int, default=20, help="每个候选 rollout 多少控制步")
     ap.add_argument("--chunk", type=int, default=30, help="每多少控制步做一次决策")
     ap.add_argument("--oracle", action="store_true", help="同时跑 oracle 选择器整条 episode")
+    ap.add_argument("--judge", default="legacy", choices=["legacy", "strict", "target"],
+                    help="成败判定口径（与 eval_ab 一致；target=当前采用的口径）")
+    ap.add_argument("--jaw-min-deg", type=float, default=0.0,
+                    help="夹爪最小指令（度）；16.05=修掉 bug 的配置")
+    ap.add_argument("--residual-deg", type=float, default=1.43,
+                    help="候选残差幅度（度），默认 1.43 = 9 个残差模型的训练值；"
+                         "环境自身默认是 5.73（0.1 rad）。用来回答"
+                         "\"放大动作空间是否真有额外上界\"")
+    ap.add_argument("--clean-finger-mm", type=float, default=13.26)
     ap.add_argument("--resume", action="store_true", help="跳过 jsonl 里已完成的 episode")
     ap.add_argument("--out", default=str(ROOT / "rl" / "eval" / "shooting_probe.json"))
     a = ap.parse_args(argv)
 
     from env_residual import ResidualSO101                           # noqa: PLC0415
     pool = parse_pool(a.episodes)
-    env = ResidualSO101(base_name=a.base, episode_pool=tuple(pool), randomize=True)
+    env = ResidualSO101(
+        base_name=a.base, episode_pool=tuple(pool), randomize=True,
+        judge=a.judge, jaw_min_deg=a.jaw_min_deg, clean_finger_mm=a.clean_finger_mm,
+        residual_deg=float(a.residual_deg),
+    )
     m, d = env.m, env.d
     rng = np.random.default_rng(0)
     lim = float(env.residual_deg)
@@ -89,7 +102,8 @@ def main(argv=None) -> int:
         两个分量都要，因为只在"已接近/已接触"阶段抬升才有意义；早期阶段只能看"是否更快靠近"。
         """
         d2 = copy.deepcopy(d)
-        ctrl = env._ctrl_from_deg(env.arm, np.asarray(action_il) + np.asarray(cand))
+        tgt = np.asarray(action_il, float) + np.asarray(cand, float)
+        ctrl = env._ctrl_from_deg(env.arm, env._apply_jaw_clamp(tgt))   # 与 env.step 同口径
         z0 = float(d2.qpos[env.arm.oadr + 2])
         box0 = env.arm.obj_pos().copy()
         tcp0 = env.arm.tcp_pos().copy()
@@ -171,6 +185,7 @@ def main(argv=None) -> int:
     g = np.asarray(gains, float)
     rep = dict(base=a.base, episodes=a.episodes, candidates=a.candidates,
                horizon=a.horizon, chunk=a.chunk, n_decisions=int(n_dec),
+               judge=a.judge, jaw_min_deg=a.jaw_min_deg, residual_deg=lim,
                gain_mean=round(float(g.mean()), 3) if g.size else None,
                gain_median=round(float(np.median(g)), 3) if g.size else None,
                gain_p90=round(float(np.percentile(g, 90)), 3) if g.size else None,

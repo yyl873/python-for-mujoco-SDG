@@ -150,6 +150,18 @@ class ResidualSO101(gym.Env):
         self._task = ""
 
     # ---------------- 观测 / 奖励 ----------------
+    def _apply_jaw_clamp(self, target_deg: np.ndarray) -> np.ndarray:
+        """夹爪目标钳制（原地写 target_deg[5] 并返回）。
+
+        抽成方法是为了让 `rl/shooting_probe.py` 的候选 rollout（走克隆 MjData、绕过 step()）
+        用**完全相同**的钳制逻辑 —— 否则探针测的上界和实际执行的上界不是一个系统。
+        """
+        _jlo, _jhi = self.m.jnt_range[self._jaw_jid]
+        target_deg[5] = float(np.clip(target_deg[5],
+                                      max(np.degrees(_jlo), self.jaw_min_deg),
+                                      np.degrees(_jhi)))
+        return target_deg
+
     def _obs(self) -> np.ndarray:
         d = self.d
         state = self._deg_from_ctrl(self.arm, d.ctrl)           # 6 维（度）
@@ -330,11 +342,7 @@ class ResidualSO101(gym.Env):
         #   而 gripper_joint 下限是 0°），等于叫夹爪死命顶死；实测这直接导致药盒被挤穿模
         #   10~22 mm。jaw_min_deg>0 时不许可到该值以下 —— 夹 15 mm 药盒需要 0.28 rad ≈ 16.05°
         #   （标定：指缝 ≈ 76·jaw_rad − 7.13 mm，0.76 mm/度，差 3° 就差 2.3 mm 夹紧量）。
-        _jlo, _jhi = self.m.jnt_range[self._jaw_jid]
-        target_deg[5] = float(np.clip(target_deg[5],
-                                      max(np.degrees(_jlo), self.jaw_min_deg),
-                                      np.degrees(_jhi)))
-        d.ctrl[:] = self._ctrl_from_deg(self.arm, target_deg)
+        d.ctrl[:] = self._ctrl_from_deg(self.arm, self._apply_jaw_clamp(target_deg))
 
         step_dt = 1.0 / self.control_hz
         t_begin = d.time - self._t0
