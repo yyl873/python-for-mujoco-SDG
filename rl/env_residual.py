@@ -69,7 +69,8 @@ class ResidualSO101(gym.Env):
                  reward_version: str = "v1", judge: str = "legacy",
                  pen_gate_mm: float = 20.8, jaw_min_deg: float = 0.0,
                  target_radius_mm: float = 60.0, out_area_mm: float = 300.0,
-                 clean_finger_mm: float = 13.26):
+                 clean_finger_mm: float = 13.26,
+                 instr_onehot=None):
         super().__init__()
         import mujoco                                    # noqa: PLC0415
         import test_render as R                          # noqa: PLC0415
@@ -116,6 +117,10 @@ class ResidualSO101(gym.Env):
         # ★ 夹爪最小指令（度）：0 = 只把负指令（低于关节下限）钳到 0（修 bug）；
         #   16.05 = 不许合过头（夹 15 mm 盒需要 0.28 rad ≈ 16.05°，标定 0.76 mm/度）。
         self.jaw_min_deg = float(jaw_min_deg)
+        # 语言条件：None = 6 维 state（原行为）；给数组则拼到 state 末尾喂给基座策略
+        # （语言条件 ACT 的 state 是 6 关节角 + N 维指令 one-hot，见 collect/export_lerobot.py --lang-onehot）
+        self.instr_onehot = (None if instr_onehot is None
+                             else np.asarray(instr_onehot, dtype=np.float32).reshape(-1))
         # ★ clean 的手指穿透阈值：取**脚本专家 30 条母本回放的 p90 = 13.26 mm**
         #   （实测见 rl/eval/expert_replay_30.json；专家 p50 7.93 / p90 13.26 / max 19.63）。
         #   早先拍过 10 mm，但那个数低于专家 p50 以上的分位、会把专家的正常夹持也判成脏。
@@ -327,6 +332,8 @@ class ResidualSO101(gym.Env):
 
         state = self._deg_from_ctrl(self.arm, d.ctrl)
         # ★ 只有 ACT 的 chunk 队列空了才需要新图（n_action_steps=100 → 渲染次数 ÷100）
+        state_in = state if self.instr_onehot is None else np.concatenate(
+            [np.asarray(state, np.float32), self.instr_onehot])
         if self.base.needs_images():
             raw = self.rig.grab(d)
             for c in self._R.CAMS:                    # 运动虚影要跟着真实运动
@@ -334,9 +341,9 @@ class ResidualSO101(gym.Env):
                 if uv is not None and self._prev_uv[c] is not None:
                     self._speeds[c] = float(np.linalg.norm(uv - self._prev_uv[c]))
                 self._prev_uv[c] = uv
-            action_il = self.base.act(state, raw, self._speeds)
+            action_il = self.base.act(state_in, raw, self._speeds)
         else:
-            action_il = self.base.act(state)
+            action_il = self.base.act(state_in)
         target_deg = action_il + a                      # ★ 单尺度：残差直接就是最终幅度
         # ★ 夹爪目标钳制（2026-11-20）：ACT 会输出超出关节范围的夹爪指令（实测最小 −1.6°，
         #   而 gripper_joint 下限是 0°），等于叫夹爪死命顶死；实测这直接导致药盒被挤穿模
