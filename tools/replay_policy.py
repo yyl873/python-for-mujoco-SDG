@@ -47,6 +47,7 @@ env -u PYTHONHOME -u PYTHONPATH MUJOCO_GL=egl python3 tools/replay_policy.py \
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import sys
 import time
@@ -79,6 +80,46 @@ class PolicyBase:
         raise NotImplementedError
 
 
+def load_policy_config(ckpt: Path):
+    """读 ckpt 的 config.json；若带 lerobot 不认识的字段，净化后重解码（不静默改 ckpt）。
+
+    坑（2026-11-21 实测，`rl/eval_lang.py` 第一次跑就撞上）：
+      `act_sim156_lang8/pretrained_model/config.json` 的 `input_features.observation.state`
+      里多了一个 `"names": [...6 个关节名, instr_left, instr_right]`，而 lerobot 0.6.2 的
+      `PolicyFeature` 只有 `(type, shape)` 两个字段 → `draccus` 直接抛
+      `DecodingError: The fields names are not valid for PolicyFeature`。
+      训练侧不受影响（`--policy.pretrained_path` 只取权重，config 由 CLI+数据集元数据重建），
+      所以这个坏 config 能训不能用，只在**推理**（本文件）这条路径上炸。
+    修法：把 features 里 `PolicyFeature` 不认的键剥掉，写成临时 config.json 再解；
+    权重、`policy_preprocessor.json`、归一化统计仍从**原目录**读，ckpt 文件一个字节都不动。
+    """
+    from lerobot.configs.policies import PreTrainedConfig      # noqa: PLC0415
+    from lerobot.configs.types import PolicyFeature            # noqa: PLC0415
+
+    cfg_dir = Path(ckpt)
+    raw = json.loads((cfg_dir / "config.json").read_text(encoding="utf-8"))
+    known = {f.name for f in dataclasses.fields(PolicyFeature)}
+    dropped: dict[str, list[str]] = {}
+    for key in ("input_features", "output_features"):
+        for feat_name, spec in (raw.get(key) or {}).items():
+            if not isinstance(spec, dict):
+                continue
+            bad = [k for k in spec if k not in known]
+            if bad:
+                dropped[f"{key}.{feat_name}"] = bad
+                raw[key][feat_name] = {k: v for k, v in spec.items() if k in known}
+    if not dropped:
+        return PreTrainedConfig.from_pretrained(str(cfg_dir))
+
+    import tempfile                                            # noqa: PLC0415
+    tmp = Path(tempfile.mkdtemp(prefix="dsh_ckpt_cfg_"))
+    (tmp / "config.json").write_text(json.dumps(raw), encoding="utf-8")
+    print(f"⚠️  {cfg_dir.name}/config.json 含 PolicyFeature 不认的键 "
+          f"{ {k: v for k, v in dropped.items()} } → 已用净化副本解码（权重仍读原目录）",
+          flush=True)
+    return PreTrainedConfig.from_pretrained(str(tmp))
+
+
 class LerobotPolicy(PolicyBase):
     """
     读 lerobot 训练出的 checkpoint，走**官方推理管线**（与 `lerobot-eval` 同一条路径）：
@@ -93,12 +134,11 @@ class LerobotPolicy(PolicyBase):
 
     def __init__(self, ckpt: Path, device: str = "cuda"):
         import torch                                              # noqa: PLC0415
-        from lerobot.configs.policies import PreTrainedConfig      # noqa: PLC0415
         from lerobot.policies.factory import get_policy_class, make_pre_post_processors  # noqa: PLC0415
 
         self.torch = torch
         self.device = device if (device != "cuda" or torch.cuda.is_available()) else "cpu"
-        cfg = PreTrainedConfig.from_pretrained(str(ckpt))
+        cfg = load_policy_config(Path(ckpt))       # ★ 净化坏 config（见函数 docstring）
         cfg.device = self.device
         cls = get_policy_class(cfg.type)
         self.policy = cls.from_pretrained(str(ckpt), config=cfg).to(self.device).eval()

@@ -217,7 +217,7 @@ python3 rl/eval_lang.py --ckpt <新 ckpt> --episodes 100-119 --seeds 2
 | 5 加宽基座 | ok | `act_sim156_lang8/pretrained_model`：config 的 state=8（补 0 列），ACT 可直接加载（52 M 参数，无 shape 冲突） |
 | 5 微调 5000 步 | **段错误（rc=139）** | 用户 GPU 终端：**跑到 839/5000 步（4:59，2.87 step/s）段错误、核心已转储**，此前 loss 正常（l1 0.109 / kld 0.002），退出时 20 个泄漏信号量 → 死在 dataloader worker 侧；当时 `save_freq=1000` → **一步 ckpt 都没落**。沙箱 CPU 实测 6.5–8 s/步（不可作为方案） |
 | 5b h264 备用数据集 | ok | `rl/lang_ds/v1_h264`（`--vcodec h264`）：92 条 / 41922 帧 / **317 MB**，每相机**单文件** 41922 帧（AV1 那版是 20409+21513 / 40529+1393 的怪切分），回读 `img=ok stats=ok`、图像写入失败 0、导出 4 分 43 秒 |
-| 6 反事实评测 | 待执行 | 命令见下；判据预注册，不许看完数据再改 |
+| 6 反事实评测 | 框架已跑通，**正式结果待训练** | 框架首跑修掉 3 处 bug（见 §11.1）；控制组 4 条 rollout / 14 s；76 条约 4.5 min（CPU）。判据预注册，不许看完数据再改 |
 
 **训练段错误的头号嫌疑（编码栈，不是模型）**：`rl/lang_ds/v1` 的 mp4 是 **AV1(libdav1d)**
 （把 `file-000.mp4` 的 codec 打出来确认过），而 4 worker × prefetch 4 并发解码；本机 AV1 栈有前科：
@@ -251,8 +251,25 @@ DS_ROOT=$PWD/rl/lang_ds/v1_h264 STEPS=5000 bash rl/run_lang_train.sh
 # 若仍 139（说明与编码无关）→ 换回 AV1 + 主进程解码：
 # DS_ROOT=$PWD/rl/lang_ds/v1 WORKERS=0 STEPS=5000 bash rl/run_lang_train.sh
 # 再不行还有一档：BACKEND=pyav（换解码后端，不改数据）
-# 反事实评测：19 条训练集外场景 × 2 seed × 2 指令 = 76 条 rollout
-env -u PYTHONHOME -u PYTHONPATH MUJOCO_GL=egl .venv-rl/bin/python rl/eval_lang.py \
-    --ckpt /home/yyl/lerobot/outputs/train/act_lang_dual/checkpoints/last/pretrained_model \
-    --ds rl/lang_ds/v1 --episodes 2400-2409,2411-2419 --seeds 2
+# 反事实评测：19 条训练集外场景 × 2 seed × 2 指令 = 76 条 rollout（重试壳，崩了自动续）
+bash rl/run_lang_eval.sh
 ```
+
+### 11.1 评测链路的首次实跑与三处真 bug（2026-11-21 夜，沙箱 CPU）
+
+训练之前先把「训练完之后才用得上」的评测链路跑通，避免训练 30 分钟后再发现评测跑不起来。
+实跑暴露的问题（都已修 / 已记）：
+
+| # | 问题 | 实测症状 | 处置 | 状态 |
+|---|---|---|---|---|
+| 1 | 加宽基座的 config 带 `names` | `rl/eval_lang.py` 一启动就 `DecodingError: 'input_features.observation.state': The fields names are not valid for PolicyFeature` | `act_sim156_lang8/pretrained_model/config.json` 在 `input_features.observation.state` 里写了 8 个名字，而 lerobot 0.6.2 的 `PolicyFeature` 只有 `(type, shape)`。训练侧不受影响（`--policy.pretrained_path` 只吃权重，config 由 CLI+数据集重建）→ **能训不能用**。修法：`tools/replay_policy.py` 新增 `load_policy_config()`，把不认的键剥掉后用临时副本解码，权重/归一化仍读原目录，不改进 ckpt 文件 | 修好 |
+| 2 | 加宽基座**不能直接推理** | 8 维状态进管线 → `RuntimeError: The size of tensor a (8) must match the size of tensor b (6)` | 同一 ckpt 的 `policy_preprocessor.json` 里 normalizer 的 `observation.state` 仍是 `shape:[6]`（safetensors 里 mean/std 也只有 6 维），加宽只改了策略输入层与 config。它是**权重初始化**，评测必须指向微调后的 ckpt | 已定性 |
+| 3 | 「崩溃自动续跑」原本是坏的 | `--resume=true` 单独用 → `ValueError: A config_path is expected when resuming a run`（rc=1），3 次重试全部秒退 | lerobot 0.6.2 的 `_resolve_resume_checkpoint()` 要求同时给 `--config_path` 指向上次的 `train_config.json`。已改为 `--resume=true --config_path="$OUT/checkpoints/last/pretrained_model/train_config.json"`；本机验证：跑 6 步落 `000006` → 续跑改成 12 步 → 新增 `000009`/`000012`，**没有从头重训** | 修好并验过 |
+| 4 | `mj_step` 偶发 SIGFPE 会打断整轮评测 | 第一次评测死在第 2 条 rollout（`rc=136` 浮点异常、核心转储）；**同一条命令再跑则 4 条全过** → 是偶发，不是确定性 | 新增 `rl/run_lang_eval.sh`：每完成一条 rollout 就落盘 + `--resume` 跳已完成 + 连续两轮没有新行就停（那才是确定性触发，需换场景） | 修好 |
+
+评测框架本身已跑通（控制组：6 维基座 `act_sim156_pre` + `--no-instr`）：
+**4 条 rollout / 14 s ≈ 3.5 s 一条**（CPU，`max_seconds=15` 上限内提前判停）→
+76 条（19 场景 × 2 seed × 2 指令）**约 4.5 分钟**，CPU 足够，不必抢 GPU。
+
+训练侧速率复核（CPU，batch 8、4 worker、h264 数据集）：**6.0–6.5 s/step**（5000 步 ≈ 8.5 h），
+与上轮记录的 6.5–8 s/step 一致 → CPU 仍然不是方案；GPU 2.87 step/s 下 5000 步 ≈ 30 min。

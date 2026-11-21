@@ -17,6 +17,9 @@
 #   本机 AV1 栈已有前科——`collect/export_lerobot.py` 里记着 svt-av1 **编码** 92 条时
 #   也段错误 rc=139，而历史上训练成功的 `dagger_v1` 是 **h264**。
 #   对策（按顺序试）：
+#     ⓿ 续跑参数：lerobot 0.6.2 单独给 `--resume=true` 会 ValueError（要求同时给
+#        `--config_path=<output_dir>/checkpoints/last/pretrained_model/train_config.json`）；
+#        脚本里已带，本机验过 6 步 → 12 步真续跑。
 #     ① WORKERS=0                 —— 解码退回主进程，绕开 worker
 #     ② DS_ROOT=rl/lang_ds/v1_h264 —— 换 h264 数据集（导出脚本加 --vcodec h264）
 #     ③ SAVE_FREQ 默认从 1000 降到 250：崩了最多丢 1.5 分钟，且脚本自动 --resume 续跑
@@ -56,8 +59,15 @@ echo
 rc=1
 for attempt in $(seq 1 "$ATTEMPTS"); do
   RESUME=()
-  # 上一次已经落了 ckpt 就接着跑（lerobot 的 --resume 从 <output_dir>/checkpoints/last 续）
-  if [ -e "$OUT/checkpoints/last" ]; then RESUME=(--resume=true); fi
+  # 上一次已经落了 ckpt 就接着跑。
+  # ★★ 2026-11-21 实测：`--resume=true` **单独用会直接 ValueError** —— lerobot 0.6.2 的
+  #   `_resolve_resume_checkpoint()` 要求同时给 `--config_path` 指向上次的 train_config.json，
+  #   否则 `rc=1`、一步都续不上（这条原本会让"崩溃自动续跑"完全失效，等于白留 3 次重试）。
+  #   正确写法已在本机验过：跑 6 步落 000006 → 续跑改成 12 步 → 新增 000009/000012，未从头重训。
+  if [ -e "$OUT/checkpoints/last/pretrained_model/train_config.json" ]; then
+    RESUME=(--resume=true
+            --config_path="$OUT/checkpoints/last/pretrained_model/train_config.json")
+  fi
   echo "=== attempt $attempt/$ATTEMPTS  $(date +%H:%M:%S)  resume=${RESUME[*]:-no} ==="
 
   env -u PYTHONHOME -u PYTHONPATH "$PY" \
