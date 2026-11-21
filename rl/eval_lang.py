@@ -103,9 +103,12 @@ def load_task_order(ds: Path | None, fallback: list[str]) -> list[str]:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="语言条件 ACT 的反事实评测")
-    ap.add_argument("--ckpt", required=True, help="ACT checkpoints/.../pretrained_model 目录")
+    ap.add_argument("--ckpt", required=True,
+                    help="被评测的 ACT checkpoints/.../pretrained_model 目录（★ 真正跑的就是它）")
     ap.add_argument("--ds", default=None, help="训练用数据集（读 task_order；可省）")
-    ap.add_argument("--base", default="sim156", help="环境基座名（只用于构建环境）")
+    ap.add_argument("--base", default=None,
+                    help="已被 --ckpt 取代，保留只为兼容旧命令；给了就报错，避免"
+                         "\"以为在评新模型、其实在评 sim156\"的静默错")
     ap.add_argument("--episodes", default="2060-2079", help="held-out 编号池，如 2060-2079")
     ap.add_argument("--seeds", type=int, default=2, help="每个 episode 跑几个 reset seed")
     ap.add_argument("--task-a", default="Put the medicine box into the left wooden box.")
@@ -125,6 +128,13 @@ def main(argv=None) -> int:
 
     from base_policy import ACTBase                              # noqa: PLC0415
     from env_residual import ResidualSO101                       # noqa: PLC0415
+
+    if a.base is not None:
+        raise SystemExit("--base 已废弃：要评测哪个模型请直接给 --ckpt <pretrained_model 目录>。"
+                         f"（旧命令里 --base {a.base!r} 曾被当成环境基座，"
+                         "导致 --ckpt 被无视、实际评的是别的模型）")
+    if not Path(a.ckpt).exists():
+        raise SystemExit(f"--ckpt 不存在: {a.ckpt}")
 
     pool = []
     for part in a.episodes.split(","):
@@ -170,7 +180,7 @@ def main(argv=None) -> int:
             rows, done = [], set()
 
     def run_one(eid: int, seed: int, instr: str, ix: int) -> dict:
-        env = ResidualSO101(base_name=a.base, episode_pool=(eid,),
+        env = ResidualSO101(base_name=a.ckpt, episode_pool=(eid,),
                             max_seconds=a.max_seconds, judge="target",
                             jaw_min_deg=a.jaw_min_deg,
                             instr_onehot=(None if a.no_instr else onehot(ix)),
