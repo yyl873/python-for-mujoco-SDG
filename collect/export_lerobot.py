@@ -133,9 +133,13 @@ def episode_arrays(e, src: Path, units: str, gripper_space: str = "sim",
 # 写 lerobot 数据集
 # ---------------------------------------------------------------------------
 
-def build_features(h, w):
+def build_features(h, w, state_names=None):
+    """state_names: 额外的 state 列名（语言条件实验用：指令 one-hot）。
+    给 None 时就是原来的 6 维关节角。"""
+    names = list(state_names) if state_names else list(JOINTS)
     return {
-        "observation.state": {"dtype": "float32", "shape": (6,), "names": list(JOINTS)},
+        "observation.state": {"dtype": "float32", "shape": (len(names),),
+                              "names": names},
         "action": {"dtype": "float32", "shape": (6,), "names": list(JOINTS)},
         IMG_KEYS["env"]: {"dtype": "video", "shape": (h, w, 3),
                           "names": ["height", "width", "channels"]},
@@ -164,6 +168,10 @@ def main(argv=None) -> int:
                     help="真机夹爪满量程值（仅 real-open / real-closed 有意义）。"
                          "★别用默认 100：本机真机实测 fixed 批次 49.08、corners 批次 42.27。"
                          "混训前必须传目标真机数据集的实测值，否则仿真夹爪尺度会和真机差约 2 倍")
+    ap.add_argument("--lang-onehot", action="store_true",
+                    help="把每条 episode 的 instruction 做成 one-hot 拼到 observation.state 末尾"
+                         "（6 维关节角 + N 维指令）。用于语言条件 ACT："
+                         "state 6->6+N，action 仍是 6 维。N = 本批里不同 instruction 的个数。")
     ap.add_argument("--units", choices=["deg", "rad"], default="deg",
                     help="state/action 单位（默认 deg，与 SO-101 真机数据集一致）")
     ap.add_argument("--episodes", default=None, help="只导这些编号，如 0,3,7（默认全部正样本）")
@@ -281,7 +289,15 @@ def main(argv=None) -> int:
         h = int(c.streams.video[0].codec_context.height)
         w = int(c.streams.video[0].codec_context.width)
         fps = float(c.streams.video[0].average_rate) or 30.0
-    features = build_features(h, w)
+    # ---- 语言条件：本批的指令集合 → one-hot 维度 ----
+    tasks_sorted = sorted({str(i.get("task") or task) for i in plan})
+    task_ix = {t: k for k, t in enumerate(tasks_sorted)}
+    state_names = None
+    if args.lang_onehot:
+        state_names = list(JOINTS) + [f"instr_{k}" for k in range(len(tasks_sorted))]
+        print(f"  语言条件: state 6 -> {len(state_names)} 维；指令 {len(tasks_sorted)} 种 "
+              + ", ".join(f"[{k}] {t!r}" for t, k in task_ix.items()))
+    features = build_features(h, w, state_names)
 
     ds = LeRobotDataset.create(repo_id=repo_id, fps=int(round(fps)),
                                features=features, root=dst,
@@ -300,9 +316,16 @@ def main(argv=None) -> int:
                              f"wrist={len(wrist_fr)} 与轨迹 {len(item['keep'])} 不一致")
         idx = np.where(item["keep"])[0]
         ep_task = item.get("task") or task
+        oh = None
+        if args.lang_onehot:
+            oh = np.zeros(len(tasks_sorted), dtype=np.float32)
+            oh[task_ix[str(ep_task)]] = 1.0
         for j, k in enumerate(idx):
+            st = item["state"][j].astype(np.float32)
+            if oh is not None:
+                st = np.concatenate([st, oh])
             ds.add_frame({
-                "observation.state": item["state"][j].astype(np.float32),
+                "observation.state": st,
                 "action": item["action"][j].astype(np.float32),
                 IMG_KEYS["env"]: env_fr[k],
                 IMG_KEYS["wrist"]: wrist_fr[k],
@@ -327,6 +350,9 @@ def main(argv=None) -> int:
         units=args.units, joints=JOINTS,
         tasks=sorted({str(i.get("task") or task) for i in plan}),
         task_default=task,
+        lang_onehot=bool(args.lang_onehot),
+        state_dim=(len(state_names) if state_names else 6),
+        task_order=tasks_sorted,
         gripper_space=args.gripper_space,
         jaw_open_deg=float(args.jaw_open_deg),
         gripper_full=float(args.gripper_full),
