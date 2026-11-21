@@ -43,7 +43,7 @@ def base_seed0() -> dict[int, dict]:
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
-        argv = [str(p) for p in sorted((ROOT / "rl" / "eval").glob("shooting_clamp_*.jsonl"))]
+        argv = [str(p) for p in sorted((ROOT / "rl" / "eval").glob("shooting_*.jsonl"))]
     base = base_seed0()
     print(f"对照：基座+钳爪 seed0 = {sum(r['success'] for r in base.values())}/{len(base)} 成功\n")
     for f in argv:
@@ -62,10 +62,21 @@ def main(argv=None) -> int:
         # 配对：oracle 修好了哪些基座失败
         fixed = [e for e in sorted(orc) if orc[e].get("success") and not base.get(e, {}).get("success")]
         broke = [e for e in sorted(orc) if not orc[e].get("success") and base.get(e, {}).get("success")]
-        print(f"== {p.name}  episode 数 {len(rec)}（oracle 行 {len(orc)}）")
+        meta = {}
+        mj = Path(str(p).replace(".jsonl", ".json"))
+        if mj.exists():
+            try:
+                meta = json.loads(mj.read_text(encoding="utf-8"))
+            except Exception:                                # noqa: BLE001
+                meta = {}
+        # 早期 json 没有 score 字段（那时只有 lift 一种口径）
+        score = meta.get("score") or ("lift" if meta else "?")
+        deg = meta.get("residual_deg", "?")
+        print(f"== {p.name}  打分={score}  幅度±{deg}°  episode 数 {len(rec)}（oracle 行 {len(orc)}）")
         if g.size:
-            print(f"   chunk 级 best_gain: 均值 {g.mean():+.2f} / 中位 {np.median(g):+.2f} / "
-                  f"p90 {np.percentile(g, 90):+.2f} mm；>2mm {100*np.mean(g > 2):.1f}%；≤0 {100*np.mean(g <= 0):.1f}%  "
+            unit = "mm（抬升）" if score == "lift" else "mm（靠近）"
+            print(f"   chunk 级 best_gain {unit}: 均值 {g.mean():+.2f} / 中位 {np.median(g):+.2f} / "
+                  f"p90 {np.percentile(g, 90):+.2f}；>2mm {100*np.mean(g > 2):.1f}%；≤0 {100*np.mean(g <= 0):.1f}%  "
                   f"（决策 {g.size} 次）")
         print(f"   oracle 整条 episode: {n_ok}/{len(orc)} 成功；同批基座+钳爪 {b_ok}/{len(orc)}")
         print(f"   oracle 修好的基座失败: {fixed}")

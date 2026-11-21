@@ -72,6 +72,10 @@ def main(argv=None) -> int:
     ap.add_argument("--horizon", type=int, default=20, help="每个候选 rollout 多少控制步")
     ap.add_argument("--chunk", type=int, default=30, help="每多少控制步做一次决策")
     ap.add_argument("--oracle", action="store_true", help="同时跑 oracle 选择器整条 episode")
+    ap.add_argument("--score", default="lift", choices=["lift", "approach"],
+                    help="候选打分口径：lift=20 步后药盒抬升（默认，§19 用的）；"
+                         "approach=20 步内 TCP 到药盒距离下降量（用在 approach 阶段才有区分度，"
+                         "补 §19.4 的盲区）")
     ap.add_argument("--judge", default="legacy", choices=["legacy", "strict", "target"],
                     help="成败判定口径（与 eval_ab 一致；target=当前采用的口径）")
     ap.add_argument("--jaw-min-deg", type=float, default=0.0,
@@ -112,10 +116,11 @@ def main(argv=None) -> int:
             d2.ctrl[:] = ctrl
             env._mujoco.mj_step(m, d2)
         lift = (float(d2.qpos[env.arm.oadr + 2]) - z0) * 1000.0
-        # 用同一份克隆状态估 TCP 位移（近似：arm.site_xpos 在 d2 里可能未刷新，故按关节变化估算）
-        q0 = np.asarray(d.qpos[env.arm.adr], float)
-        q1 = np.asarray(d2.qpos[env.arm.adr], float)
-        approach = float(np.linalg.norm(q1 - q0)) * 0.0      # 占位：不做几何近似，改用下面 d 的前后距离
+        # 候选 rollout 结束时的 TCP-药盒距离（直接从克隆的 d2 读，和 obj_pos/tcp_pos 同源）
+        box1 = np.asarray(d2.qpos[env.arm.oadr:env.arm.oadr + 3], float)
+        tcp1 = np.asarray(d2.site_xpos[env.arm.tcp], float)
+        d1 = float(np.linalg.norm(tcp1 - box1))
+        approach = (d0 - d1) * 1000.0        # 正=更靠近药盒（mm）
         return lift, d0, approach
 
     jl = Path(str(a.out).replace(".json", ".jsonl"))
@@ -145,9 +150,11 @@ def main(argv=None) -> int:
                                                    size=(a.candidates - 1, 6))])
                     out = [roll(c, base_act, a.horizon) for c in cands]
                     lifts = [o[0] for o in out]
-                    ep_gains.append(float(np.max(lifts) - lifts[0]))   # 相对"零残差"的抬升增益
+                    appr = [o[2] for o in out]
+                    scores = lifts if a.score == "lift" else appr
+                    ep_gains.append(float(np.max(scores) - scores[0]))  # 相对"零残差"的增益
                     ep_gain_abs.append(float(np.max(np.abs(lifts))))    # 该点最大抬升幅度（判断阶段）
-                    kept = cands[int(np.argmax(lifts))] if a.oracle else np.zeros(6)
+                    kept = cands[int(np.argmax(scores))] if a.oracle else np.zeros(6)
                     n_dec += 1
                 obs, r, term, trunc, inf2 = env.step(kept)
                 info = inf2
@@ -185,7 +192,7 @@ def main(argv=None) -> int:
     g = np.asarray(gains, float)
     rep = dict(base=a.base, episodes=a.episodes, candidates=a.candidates,
                horizon=a.horizon, chunk=a.chunk, n_decisions=int(n_dec),
-               judge=a.judge, jaw_min_deg=a.jaw_min_deg, residual_deg=lim,
+               judge=a.judge, jaw_min_deg=a.jaw_min_deg, residual_deg=lim, score=a.score,
                gain_mean=round(float(g.mean()), 3) if g.size else None,
                gain_median=round(float(np.median(g)), 3) if g.size else None,
                gain_p90=round(float(np.percentile(g, 90)), 3) if g.size else None,
