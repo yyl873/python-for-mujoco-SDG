@@ -563,11 +563,22 @@ def make_spawn_fn(cfg):
     x, y, z = cfg["spawn"]["x"], cfg["spawn"]["y"], cfg["spawn"]["z"]
     yaw = np.radians(cfg["spawn"]["yaw_deg"])
 
+    prev = cfg.get("prev") or {}
+
     def _spawn(arm):
         d, a = arm.d, arm
         d.qpos[a.oadr + 0:a.oadr + 3] = [x, y, z]
         # 绕 z 的偏航四元数（w, x, y, z），保持药盒直立
         d.qpos[a.oadr + 3:a.oadr + 7] = [np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)]
+        # ---- 木箱里"之前放进去的药盒"（默认挪到场外，等于没有这个物体）----
+        if getattr(a, "obj_b", -1) >= 0:
+            adr = int(a.m.jnt_qposadr[a.m.body_jntadr[a.obj_b]])
+            for pose in (prev.get("objects") or []):
+                d.qpos[adr:adr + 3] = pose[:3]
+                d.qpos[adr + 3:adr + 7] = pose[3:7]
+                break                      # 一个 body 只能表示一个预置盒；多个靠 cfg 记录
+            if not (prev.get("objects") or []):
+                d.qpos[adr:adr + 3] = [0.750, 0.600, -0.35]   # 场外：落到远处地板，xy 与木箱不重叠
 
     return _spawn
 
@@ -810,7 +821,9 @@ def judge(rec, info, cfg):
             lo_b, hi_b = _aabb(p_b, q_b)
             xy_overlap = (lo_o[0] <= hi_b[0] and lo_b[0] <= hi_o[0]
                           and lo_o[1] <= hi_b[1] and lo_b[1] <= hi_o[1])
-            resting_on_top = lo_o[2] >= (hi_b[2] - 0.005)
+            # 前一盒必须在木箱内（z 不低于箱底附近），否则它只是被"挪到场外"了，不算数
+            prev_in_box = hi_b[2] > 0.005
+            resting_on_top = prev_in_box and (lo_o[2] >= (hi_b[2] - 0.005))
             prev = dict(z_lo_mm=round(float(lo_o[2]) * 1000, 2),
                         prev_top_mm=round(float(hi_b[2]) * 1000, 2),
                         dy_mm=round(float(ob_pos[1] - p_b[1]) * 1000, 1),
@@ -1770,6 +1783,9 @@ def main(argv=None):
     ap.add_argument("--no-extrinsics", dest="extrinsics", action="store_false")
     ap.add_argument("--burn-counter", action="store_true",
                     help="视频左上角烧 'Env F:n' 帧号（调试用；训练数据不要开）")
+    ap.add_argument("--prev-object", default="none", choices=["none", "random"],
+                    help="木箱里是否预置'之前的药盒'：none=挪出场外（默认，等于没有）；"
+                         "random=随机摆 1 个（位置/朝向随机），用来统计被挡住的比例")
     ap.add_argument("--target-box", default="target_box",
                     help="目标箱的 body 名（默认 target_box；VLA 空间指令实验用 target_box_b）。"
                          "只是把专家剧本的 place/transport/retract 目标点换个箱子，"
@@ -1929,6 +1945,22 @@ def main(argv=None):
         #   这样 --n 25 与 --n 20 后再 --start 20 --n 5 抽到的随机量逐位相同。
         rng_ep = np.random.default_rng([int(base_seed), int(eid)])
         cfg = sample_episode(rng_ep, eid, pad, theta_cap, arm=arm, nom=nom)
+        # ---- 预置药盒（默认不生成；--prev-object random 时才摆）----
+        if args.prev_object == "random":
+            # 横放在木箱内腔，位置在 y 方向随机摊开（半个 footprint 26mm 内收）
+            dy = float(rng_ep.uniform(-0.030, 0.030))
+            dx = float(rng_ep.uniform(-0.012, 0.012))
+            yaw_p = float(rng_ep.uniform(-0.35, 0.35))       # ±20°
+            qz = [np.cos(yaw_p / 2), 0.0, 0.0, np.sin(yaw_p / 2)]
+            # 横放：绕 x 转 90°，再叠一个绕 z 的偏航 → q = qz * qx
+            cx, sx = np.cos(np.pi / 4), np.sin(np.pi / 4)
+            q = [qz[0] * cx, qz[1] * cx + qz[2] * sx + qz[3] * sx,
+                 qz[2] * cx + qz[1] * sx - qz[3] * sx, qz[3] * cx]
+            cfg["prev"] = dict(count=1, mode="random",
+                               objects=[[0.290 + dx, -0.132 + dy, 0.0115] + [float(v) for v in q]],
+                               note="y 偏移 %.1fmm / 偏航 %.1f°" % (dy * 1000, np.degrees(yaw_p)))
+        else:
+            cfg["prev"] = dict(count=0, mode="none", objects=[])
         t_ep = time.time()
         if cfg.get("_posture") is None:
             print(f"  [{k+1:>3}/{args.n}] ⚠️ ep_{eid:06d} 反向生成没采到可行姿态，"
