@@ -125,7 +125,8 @@ def run_episode(env, policy, *, max_steps=None, video=None, fps=30, width=640, h
     #   strict/legacy：抬升/接触/倾角/持续性都过（历史口径；倾角 ≤15° 在抬升段物理不可达，见报告 §16）
     #   target       ：成功 且 **抓取段手指穿透 ≤10 mm**（专家母本实测 3.1/8.9 mm，ACT 8~23 mm）
     if judge == "target":
-        clean_success = bool(success and float(info.get("pen_finger_grasp_max_mm", 99.0)) <= 10.0)
+        clean_success = bool(success and float(info.get("pen_finger_grasp_max_mm", 99.0))
+                             <= env.clean_finger_mm)
     else:
         clean_success = bool(success and tilt_max <= 15.0 and streak_max >= 5)
     return dict(success=success, steps=steps,
@@ -157,6 +158,8 @@ def main(argv=None) -> int:
     ap.add_argument("--judge", default="legacy", choices=["legacy", "strict", "target"],
                     help="成败判定口径：legacy=旧；strict=连续5步洁净成功(历史口径，与任务矛盾，见报告 §16)；"
                          "target=抬升≥50mm 且把药盒放进木盒区域（推荐）")
+    ap.add_argument("--clean-finger-mm", type=float, default=13.26,
+                    help="target 判据下 clean 的手指穿透阈值（默认 13.26 = 脚本专家 30 条回放的 p90）")
     ap.add_argument("--jaw-min-deg", type=float, default=0.0,
                     help="夹爪最小指令（度）。0=只把负指令钳到 0（修 bug）；16.05=不许合过头"
                          "（夹 15 mm 盒需要 0.28 rad，标定 0.76 mm/度）")
@@ -232,7 +235,7 @@ def main(argv=None) -> int:
                             swap_cams=a.swap_cams, use_sensor=not a.no_sensor,
                             max_seconds=a.max_seconds,
                             judge=a.judge, reward_version=a.reward,
-                            jaw_min_deg=a.jaw_min_deg)
+                            jaw_min_deg=a.jaw_min_deg, clean_finger_mm=a.clean_finger_mm)
         try:
             for eid in pool:
                 for s in range(a.seeds):

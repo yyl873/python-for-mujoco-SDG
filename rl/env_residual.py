@@ -68,7 +68,8 @@ class ResidualSO101(gym.Env):
                  width: int = 640, height: int = 480,
                  reward_version: str = "v1", judge: str = "legacy",
                  pen_gate_mm: float = 20.8, jaw_min_deg: float = 0.0,
-                 target_radius_mm: float = 60.0, out_area_mm: float = 300.0):
+                 target_radius_mm: float = 60.0, out_area_mm: float = 300.0,
+                 clean_finger_mm: float = 13.26):
         super().__init__()
         import mujoco                                    # noqa: PLC0415
         import test_render as R                          # noqa: PLC0415
@@ -115,6 +116,10 @@ class ResidualSO101(gym.Env):
         # ★ 夹爪最小指令（度）：0 = 只把负指令（低于关节下限）钳到 0（修 bug）；
         #   16.05 = 不许合过头（夹 15 mm 盒需要 0.28 rad ≈ 16.05°，标定 0.76 mm/度）。
         self.jaw_min_deg = float(jaw_min_deg)
+        # ★ clean 的手指穿透阈值：取**脚本专家 30 条母本回放的 p90 = 13.26 mm**
+        #   （实测见 rl/eval/expert_replay_30.json；专家 p50 7.93 / p90 13.26 / max 19.63）。
+        #   早先拍过 10 mm，但那个数低于专家 p50 以上的分位、会把专家的正常夹持也判成脏。
+        self.clean_finger_mm = float(clean_finger_mm)
         self._prev_dist = 0.0
         self._lift_streak = 0
         self.action_space = spaces.Box(low=-self.residual_deg, high=self.residual_deg,
