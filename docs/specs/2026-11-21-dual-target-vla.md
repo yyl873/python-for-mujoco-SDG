@@ -333,7 +333,7 @@ cd /home/yyl/deepseek-harness
 env -u PYTHONHOME -u PYTHONPATH /home/yyl/miniforge3/envs/lerobot312/bin/python \
     rl/probe_gpu_health.py --steps 200
 ```
-### 11.3 第三轮（22:06，GPU 侧换了一种崩法：CUDA INTERNAL ASSERT）
+### 11.4 第三轮加固与 CPU 兜底（22:06，另一窗口记录；与 §11.3 同一现象）
 
 续跑（从 `001250` 起、剩余 3750 步）跑到 **55 步**时报：
 `RuntimeError: d.is_cuda() INTERNAL ASSERT FAILED at "c10/cuda/impl/CUDAGuardImpl.h":34`，
