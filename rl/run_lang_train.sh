@@ -47,6 +47,9 @@ DS_ROOT="${DS_ROOT:-$PWD/rl/lang_ds/v1}"
 BASE="${BASE:-/home/yyl/lerobot/outputs/train/act_sim156_lang8/pretrained_model}"
 # 解码后端：lerobot 默认 torchcodec；BACKEND=pyav 可换 pyav 解码（降档第 2 级用）
 BACKEND="${BACKEND:-}"
+# 数据集/策略标签（push_to_hub=false，只进元数据；换数据集时别让日志串台）
+REPO_ID="${REPO_ID:-local/v1}"
+POLICY_ID="${POLICY_ID:-local/act_lang_dual}"
 
 for p in "$DS_ROOT" "$BASE"; do
   [ -e "$p" ] || { echo "缺依赖: $p" >&2; exit 2; }
@@ -102,10 +105,10 @@ for attempt in $(seq 1 "$ATTEMPTS"); do
   ALOG="$PWD/rl/logs/attempt_${attempt}_$(date +%H%M%S).log"
   mkdir -p "$PWD/rl/logs"
   env -u PYTHONHOME -u PYTHONPATH CUDA_LAUNCH_BLOCKING="$CLB" "$PY" \
-    --dataset.repo_id=local/v1 \
+    --dataset.repo_id="${REPO_ID}" \
     --dataset.root="$DS_ROOT" \
     --policy.type=act \
-    --policy.repo_id=local/act_lang_dual \
+    --policy.repo_id="${POLICY_ID}" \
     --policy.pretrained_path="$BASE" \
     --policy.push_to_hub=false --save_checkpoint_to_hub=false \
     --batch_size="$BATCH" --steps="$STEPS" --save_freq="$SAVE_FREQ" \

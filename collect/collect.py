@@ -1792,6 +1792,12 @@ def main(argv=None):
                          "不改任何物理参数")
     ap.add_argument("--instruction", default=DEFAULT_INSTRUCTION,
                     help="写进每条 meta 的自然语言指令（给 VLA 用；纯视觉可以无视）")
+    ap.add_argument("--scene-seed-offset", type=int, default=0, metavar="K",
+                    help="反事实配对用：派生随机化用的场景编号 = eid - K（默认 0，即用 eid 自己）。"
+                         "★只改随机化种子的派生，不碰任何物理参数。"
+                         "配合两条不同编号段 + 同一个 --seed，可让【两条 episode 拿到逐位相同的场景】，"
+                         "只有 --instruction/--target-box 不同 —— 这是消掉"
+                         "『指令与场景共线（episode_index 区间分配）』伪相关的唯一办法。")
     ap.add_argument("--reset", action="store_true",
                     help="先清空索引层（片段 + index.json）再继续生成 --n 条；"
                          "注意它【不会】单独退出，只清索引不删产物")
@@ -1943,7 +1949,11 @@ def main(argv=None):
             continue
         # ★每条一个独立 rng（只由 base_seed 与 eid 决定）：
         #   这样 --n 25 与 --n 20 后再 --start 20 --n 5 抽到的随机量逐位相同。
-        rng_ep = np.random.default_rng([int(base_seed), int(eid)])
+        # ★--scene-seed-offset：反事实配对（2026-11-21）。默认 0 = 老行为逐位不变；
+        #   给 K 时场景编号取 eid-K，于是 eid=3000..3009（左指令）与 eid=4000..4009
+        #   （右指令，--scene-seed-offset 1000）拿到**同一个场景**，只有指令/目标箱不同。
+        scene_eid = int(eid) - int(args.scene_seed_offset)
+        rng_ep = np.random.default_rng([int(base_seed), int(scene_eid)])
         cfg = sample_episode(rng_ep, eid, pad, theta_cap, arm=arm, nom=nom)
         # ---- 预置药盒（默认不生成；--prev-object random 时才摆）----
         if args.prev_object == "random":

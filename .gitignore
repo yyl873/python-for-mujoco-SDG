@@ -44,3 +44,7 @@ venv/
 /rl/dagger_ds/
 # 语言条件数据集副本（collect/export_lerobot.py 重生成；604 MB 视频，只留脚本不留数据）
 /rl/lang_ds/
+
+# 配对采集/导出的编号清单（运行时生成）
+/.lang_pair_ids*.txt
+/.lang_ids.txt
