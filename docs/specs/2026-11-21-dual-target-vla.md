@@ -215,8 +215,16 @@ python3 rl/eval_lang.py --ckpt <新 ckpt> --episodes 100-119 --seeds 2
 | 3 采集 | ok | 编号段 2000–2099 采 100 条，**验收通过 92 条**（`.lang_ids.txt`），另 8 条 `reject_reasons` 非空 |
 | 4 数据集副本 | ok | `rl/lang_ds/v1`：**92 条 / 41922 帧 / 604 MB**；`observation.state` **8 维**（6 关节 + `instr_left`/`instr_right`）；`tasks.parquet` **2 行**；episodes 的 tasks 分布 **45 left / 47 right**；`meta/sim_provenance.json` 的 `task_order` 与 `tasks.parquet` 同序；回读 `len=41922 episodes=92 state(8,) action(6,) img=ok stats=ok`；**图像写入失败 0 条** |
 | 5 加宽基座 | ok | `act_sim156_lang8/pretrained_model`：config 的 state=8（补 0 列），ACT 可直接加载（52 M 参数，无 shape 冲突） |
-| 5 微调 5000 步 | **待执行（GPU）** | 沙箱不可见 `/dev/nvidia*`（`torch.cuda.is_available()=False`），且 `/home/yyl/lerobot` 在工作区外只读 → 只能在用户终端跑。CPU 实测 **6.5–8 s/步**（batch 8），5000 步 ≈ 9–11 h，不作为选项 |
+| 5 微调 5000 步 | **段错误（rc=139）** | 用户 GPU 终端：**跑到 839/5000 步（4:59，2.87 step/s）段错误、核心已转储**，此前 loss 正常（l1 0.109 / kld 0.002），退出时 20 个泄漏信号量 → 死在 dataloader worker 侧；当时 `save_freq=1000` → **一步 ckpt 都没落**。沙箱 CPU 实测 6.5–8 s/步（不可作为方案） |
+| 5b h264 备用数据集 | ok | `rl/lang_ds/v1_h264`（`--vcodec h264`）：92 条 / 41922 帧 / **317 MB**，每相机**单文件** 41922 帧（AV1 那版是 20409+21513 / 40529+1393 的怪切分），回读 `img=ok stats=ok`、图像写入失败 0、导出 4 分 43 秒 |
 | 6 反事实评测 | 待执行 | 命令见下；判据预注册，不许看完数据再改 |
+
+**训练段错误的头号嫌疑（编码栈，不是模型）**：`rl/lang_ds/v1` 的 mp4 是 **AV1(libdav1d)**
+（把 `file-000.mp4` 的 codec 打出来确认过），而 4 worker × prefetch 4 并发解码；本机 AV1 栈有前科：
+`collect/export_lerobot.py:139` 记着 svt-av1 **编码** 92 条时同样 **rc=139**，而历史上训练成功的
+`dagger_v1` 是 **h264**。已建好 h264 版数据集作为对照，并按此重写训练脚本：
+`SAVE_FREQ` 默认 1000→**250**、`ATTEMPTS=3` 自动 `--resume` 续跑、`WORKERS`/`BACKEND` 可切。
+先跑 h264 版（单变量：只换编码），崩溃点 839 步已被 1200+ 步覆盖。
 
 **held-out 段已补采（本 spec §10.4 的硬要求）**：原默认 `--episodes 2060-2079` 里
 大部分 episode **已经进了训练集**（`--lang-onehot` 导出了全部 92 条），拿它当 held-out
@@ -238,8 +246,11 @@ python3 rl/eval_lang.py --ckpt <新 ckpt> --episodes 100-119 --seeds 2
 **下一步命令（用户终端，有 GPU）**：
 ```bash
 cd /home/yyl/deepseek-harness
-# 微调（≈17 min @ 0.2 s/step；输出 /home/yyl/lerobot/outputs/train/act_lang_dual）
-STEPS=5000 bash rl/run_lang_train.sh
+# 微调（先跑 h264 版：单变量只换编码；≈30 min @ 2.87 step/s，输出 ~/lerobot/outputs/train/act_lang_dual）
+DS_ROOT=$PWD/rl/lang_ds/v1_h264 STEPS=5000 bash rl/run_lang_train.sh
+# 若仍 139（说明与编码无关）→ 换回 AV1 + 主进程解码：
+# DS_ROOT=$PWD/rl/lang_ds/v1 WORKERS=0 STEPS=5000 bash rl/run_lang_train.sh
+# 再不行还有一档：BACKEND=pyav（换解码后端，不改数据）
 # 反事实评测：19 条训练集外场景 × 2 seed × 2 指令 = 76 条 rollout
 env -u PYTHONHOME -u PYTHONPATH MUJOCO_GL=egl .venv-rl/bin/python rl/eval_lang.py \
     --ckpt /home/yyl/lerobot/outputs/train/act_lang_dual/checkpoints/last/pretrained_model \
