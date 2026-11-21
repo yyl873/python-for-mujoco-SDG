@@ -779,6 +779,48 @@ def judge(rec, info, cfg):
             and BOX_DROP_Z[0] <= fin[2] <= BOX_DROP_Z[1]):
         reasons.append("not_in_box")
 
+    # ---- 2026-11-21 新增两条验收判据（对应"扣分"需求）----
+    # P1 夹取/搬运过程中碰到**非目标物体**（另一个木箱 target_box_b / 木箱里之前的药盒 object_b）
+    other_n = np.asarray(rec._rows.get("other_n") or [0])
+    n_other = int((other_n > 0).sum())
+    if n_other > 0:
+        reasons.append(f"hit_other_object({n_other}f)")
+
+    # P2 药盒"落进木盒但被之前的药盒挡住"：xy 上压在前一个盒子的正上方（AABB 相交），
+    #    且自己的底面没有落到盒底高度带 —— 就是架在/卡在别的药盒上。
+    prev = None
+    try:
+        a = rec.a
+        if getattr(a, "obj_b", -1) >= 0:
+            import mujoco as _mj                      # noqa: PLC0415
+            adr_b = int(a.m.jnt_qposadr[a.m.body_jntadr[a.obj_b]])
+            p_b = np.asarray(a.d.qpos[adr_b:adr_b + 3], float)
+            q_b = np.asarray(a.d.qpos[adr_b + 3:adr_b + 7], float)
+            ob_pos = np.asarray(obj[-1], float)
+            oq_last = np.asarray(rec._rows["obj_quat"][-1], float)
+            half = np.array([0.037, 0.0075, 0.026])
+
+            def _aabb(pos, quat):
+                Rot = np.zeros(9)
+                _mj.mju_quat2Mat(Rot, np.asarray(quat, float) / (np.linalg.norm(quat) + 1e-12))
+                ext = np.abs(Rot.reshape(3, 3)) @ half
+                return pos - ext, pos + ext
+
+            lo_o, hi_o = _aabb(ob_pos, oq_last)
+            lo_b, hi_b = _aabb(p_b, q_b)
+            xy_overlap = (lo_o[0] <= hi_b[0] and lo_b[0] <= hi_o[0]
+                          and lo_o[1] <= hi_b[1] and lo_b[1] <= hi_o[1])
+            resting_on_top = lo_o[2] >= (hi_b[2] - 0.005)
+            prev = dict(z_lo_mm=round(float(lo_o[2]) * 1000, 2),
+                        prev_top_mm=round(float(hi_b[2]) * 1000, 2),
+                        dy_mm=round(float(ob_pos[1] - p_b[1]) * 1000, 1),
+                        dx_mm=round(float(ob_pos[0] - p_b[0]) * 1000, 1))
+            if xy_overlap and resting_on_top:
+                reasons.append(f"blocked_by_previous(z={lo_o[2]*1000:.1f}mm "
+                               f"> 前一盒顶 {hi_b[2]*1000:.1f}mm)")
+    except Exception as e:                            # noqa: BLE001
+        reasons.append(f"blocked_check_error({type(e).__name__})")
+
     rel = np.where(ph == "release")[0]
     if len(rel) and (cn[int(rel[-1]) + 1:] > 0).any():
         reasons.append("still_holding_after_release")
@@ -794,6 +836,8 @@ def judge(rec, info, cfg):
         home_dq_max_deg=round(float(rep["home_dq_max_deg"]), 3),
         grip_ctrl_end=round(float(rep["grip_ctrl_end"]), 4),
         box_hit_frames=int((box > 0).sum()),
+        other_hit_frames=n_other,
+        prev_obj_end=prev,
         frames=int(len(rec)),
         sim_time_s=round(float(rec._rows["time"][-1]) - float(rec._rows["time"][0]), 4),
         moving_ratio=round(float(rep["motion"]["moving_ratio"]), 3),

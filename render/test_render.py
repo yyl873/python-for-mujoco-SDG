@@ -381,6 +381,9 @@ class EpisodeRecorder:
             "contact_n", "fn_jaw", "fn_grip", "fn_sum",
             "lift_mm", "hdisp_mm",
             "box_n", "obj_speed",       # 2024-11 新增：臂↔木盒接触数 / 药盒线速度
+            # 2026-11-21 新增：臂↔非目标物体接触数（另一个木箱 / 木箱里之前的药盒）
+            #                  + 那个药盒的中心位置（判"被挡住"用）
+            "other_n", "objb_pos",
         )}
         self._obj0 = None
         self._n_all = 0
@@ -441,6 +444,9 @@ class EpisodeRecorder:
         # 注意 qvel 的地址和 qpos 的地址不是一回事（自由关节 qpos 7 个数 / qvel 6 个数），
         # 所以这里从 jnt_dofadr 查，不能拿 oadr 直接用。
         r["box_n"].append(len(a.box_hits()))
+        r["other_n"].append(len(a.other_hits()) if hasattr(a, "other_hits") else 0)
+        _pb = a.prev_obj_pos() if hasattr(a, "prev_obj_pos") else None
+        r["objb_pos"].append(list(_pb) if _pb is not None else [0.0, 0.0, 0.0])
         odof = a.m.jnt_dofadr[a.m.body_jntadr[a.obj]]
         r["obj_speed"].append(float(np.linalg.norm(d.qvel[odof:odof + 3])))
 

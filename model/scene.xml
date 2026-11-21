@@ -143,6 +143,28 @@
       <geom name="boxb_front" type="box" size="0.0535 0.002 0.025" pos="0 -0.069 0" material="mat_box"/>
       <geom name="boxb_back" type="box" size="0.0535 0.002 0.025" pos="0 0.069 0" material="mat_box"/>
     </body>
+
+    <!-- 物品4：木箱里"之前已经放进去的药盒" object_b（2026-11-21 新增）
+         用途：让"被之前落进去的药盒挡住"成为一种可判定的失败。
+         默认摆在 target_box 内腔靠后处（y 偏移 −50 mm），给后来者留下落空间。
+         ⚠️ 碰撞位掩码 contype=2 / conaffinity=7（bit0 通用件 + bit1 药盒 + bit2 指垫）。
+            必须含 bit1：原 object 的 conaffinity=5 不含 bit1，两盒之间
+            (2&5)||(2&5) = 0 → 互相穿透，"被挡住"就永远发生不了。 -->
+    <body name="object_b" pos="0.290 -0.186 0.0115" euler="1.5708 0 0">
+      <freejoint name="objb_free"/>
+      <inertial pos="0 0 0" mass="0.0115" diaginertia="2.81e-06 7.84e-06 5.46e-06"/>
+
+      <geom name="objectb_physics" type="box" size="0.037 0.0075 0.026"
+            friction="1.2 0.01 0.0001" contype="2" conaffinity="7"
+            solref="0.04 1" solimp="0.9 0.95 0.001" condim="4" rgba="0 0 0 0"/>
+
+      <geom type="box" size="0.0364 0.0001 0.0259" pos="0 -0.0074 0" material="mat_obj_front" contype="0" conaffinity="0"/>
+      <geom type="box" size="0.0364 0.0001 0.0259" pos="0 0.0074 0" material="mat_obj_back" contype="0" conaffinity="0"/>
+      <geom type="box" size="0.0001 0.0074 0.0259" pos="-0.0364 0 0" material="mat_obj_side" contype="0" conaffinity="0"/>
+      <geom type="box" size="0.0001 0.0074 0.0259" pos="0.0364 0 0" material="mat_obj_side" contype="0" conaffinity="0"/>
+      <geom type="box" size="0.0364 0.0074 0.0001" pos="0 0 0.0259" material="mat_obj_side" contype="0" conaffinity="0"/>
+      <geom type="box" size="0.0364 0.0074 0.0001" pos="0 0 -0.0259" material="mat_obj_side" contype="0" conaffinity="0"/>
+    </body>
     </worldbody>
 
   <!-- 让 MuJoCo 一启动就是指定的姿态。

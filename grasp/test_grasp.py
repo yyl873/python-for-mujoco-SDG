@@ -161,6 +161,10 @@ DEF_GZ = 0.012       # 抓取时 TCP 高度 (指垫比 TCP 高约 22mm, 必须�
 
 # 支撑面: 与药盒本就常接触, 不计入"碰撞"
 SUPPORT_BODIES = {"pick_zone", "table", "mousepad", "floor", "world"}
+# 手臂本体（含夹爪两指）。判"撞到别的物体"时，另一侧必须在这些里面，
+# 否则"药盒躺在木箱里"这种静态接触会被误判成手臂撞击。
+ARM_BODIES = {"base_link", "shoulder_link", "upper_arm_link", "lower_arm_link",
+              "wrist_link", "gripper_link", "jaw_link"}
 
 
 class Arm:
@@ -192,6 +196,10 @@ class Arm:
             raise ValueError(f"场景里没有 body {target_box!r}")
         self.tbox = nid(mujoco.mjtObj.mjOBJ_BODY, target_box)
         self.tbox_name = str(target_box)
+        # 可选：另一个木箱 / 木箱里"之前放进去的药盒"。不存在就是 -1（旧场景行为不变）。
+        self.tbox_b = nid(mujoco.mjtObj.mjOBJ_BODY, "target_box_b")
+        self.obj_b = nid(mujoco.mjtObj.mjOBJ_BODY, "object_b")
+        self.other_ids = tuple(i for i in (self.tbox_b, self.obj_b) if i >= 0)
         self.obj_geom = nid(mujoco.mjtObj.mjOBJ_GEOM, "object_physics")
         self.oadr = m.jnt_qposadr[m.body_jntadr[self.obj]]
         # 夹爪关节的 qpos 地址（reset 时要按 keyframe 的值保持，不能写死 0）
@@ -483,8 +491,52 @@ class Arm:
             other = b2 if b1 == self.tbox else b1
             if other == self.obj or self.name(other) in SUPPORT_BODIES:
                 continue                      # 药盒落在木盒里 / 木盒贴桌面，都正常
+            # ★ 2026-11-21 修正：必须限定"另一侧是手臂本体"。
+            #   否则"另一个药盒躺在木箱里"这种静态接触会被误算成"手臂撞木箱"
+            #   （实测 object_b 在箱内时 box_hits 报 428~468 帧，几乎整条 episode）。
+            if self.name(other) not in ARM_BODIES:
+                continue
             res.append((other, int(c.geom1), int(c.geom2)))
         return res
+
+
+    def other_hits(self):
+        """机械臂(含夹爪) 与**非目标物体**的接触（2026-11-21 新增）。
+
+        "非目标物体" = 另一个木箱(target_box_b) + 木箱里之前放进去的药盒(object_b)。
+        对应需求："夹取/搬运过程中碰到别的箱子/药盒要扣分"。
+        口径与 `box_hits()` 完全一致：一侧是指定物体、另一侧既不是目标药盒也不是支撑面。
+        """
+        res = []
+        if not self.other_ids:
+            return res
+        others = set(self.other_ids)
+        for i in range(self.d.ncon):
+            c = self.d.contact[i]
+            b1 = int(self.m.geom_bodyid[c.geom1])
+            b2 = int(self.m.geom_bodyid[c.geom2])
+            hit = None
+            if b1 in others and b2 not in others:
+                hit = (b1, b2)
+            elif b2 in others and b1 not in others:
+                hit = (b2, b1)
+            if hit is None:
+                continue
+            target, other = hit
+            if other == self.obj or self.name(other) in SUPPORT_BODIES:
+                continue          # 目标药盒落在木箱里 / 物体贴桌面，都正常
+            if self.name(other) not in ARM_BODIES:
+                continue          # ★ 只算"手臂撞过去"，两个箱/盒之间的静态接触不算
+            res.append((int(target), int(c.geom1), int(c.geom2)))
+        return res
+
+    def prev_obj_pos(self):
+        """木箱里"之前的药盒"当前中心；没有该物体返回 None。"""
+        if self.obj_b < 0:
+            return None
+        return np.asarray(self.d.qpos[self.m.jnt_qposadr[self.m.body_jntadr[self.obj_b]]:
+                                      self.m.jnt_qposadr[self.m.body_jntadr[self.obj_b]] + 3],
+                          float).copy()
 
 
 # ============================================================
