@@ -27,6 +27,8 @@ venv/
 # rl/ckpt：SAC 权重（每个 ~0.9 MB × seed），重建需 3×30k 步训练
 /rl/ckpt/
 /rl/runs/
+# outputs/：本机训练产物（每个 ckpt ~200 MB，重建靠训练；CPU 续跑落这里）
+/outputs/
 
 # ===== 兜底：任何漏网的大产物 =====
 *.npz

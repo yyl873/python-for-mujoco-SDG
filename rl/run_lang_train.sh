@@ -74,11 +74,20 @@ echo
 stage=0            # 0=配置原样  1=num_workers=0  2=num_workers=0 + pyav
 fails_here=0
 rc=1
+cuda_hits=0
 for attempt in $(seq 1 "$ATTEMPTS"); do
+  if [ "$(step_now)" -ge "$STEPS" ]; then
+    echo "已训 $(step_now) 步，达到目标 $STEPS → 不用再跑"
+    rc=0
+    break
+  fi
+  # 档位阶梯：越往下越"低负载"，代价是慢一点
+  #   档0 原样(4 worker) → 档1 worker=0 → 档2 +pyav → 档3 +CUDA_LAUNCH_BLOCKING=1
   case "$stage" in
-    0) W="$WORKERS"; B="$BACKEND" ;;
-    1) W=0;          B="$BACKEND" ;;
-    *) W=0;          B="pyav" ;;
+    0) W="$WORKERS"; BK="$BACKEND"; CLB=0 ;;
+    1) W=0;          BK="$BACKEND"; CLB=0 ;;
+    2) W=0;          BK="pyav";     CLB=0 ;;
+    *) W=0;          BK="pyav";     CLB=1 ;;
   esac
 
   RESUME=()
@@ -86,10 +95,13 @@ for attempt in $(seq 1 "$ATTEMPTS"); do
     RESUME=(--resume=true
             --config_path="$OUT/checkpoints/last/pretrained_model/train_config.json")
   fi
-  echo "=== attempt $attempt/$ATTEMPTS 档$stage(workers=$W backend=${B:-默认}) 已训=$(step_now)步" \
-       " $(date +%H:%M:%S) resume=${RESUME[*]:-no} ==="
+  echo "=== attempt $attempt/$ATTEMPTS 档$stage(workers=$W backend=${BK:-默认} cuda_block=$CLB)" \
+       "已训=$(step_now)步 $(date +%H:%M:%S) resume=${RESUME[*]:-no} ==="
 
-  env -u PYTHONHOME -u PYTHONPATH "$PY" \
+  # ★ 记下本次 attempt 的日志，崩溃后好定位（尤其 CUDA 类错误）
+  ALOG="$PWD/rl/logs/attempt_${attempt}_$(date +%H%M%S).log"
+  mkdir -p "$PWD/rl/logs"
+  env -u PYTHONHOME -u PYTHONPATH CUDA_LAUNCH_BLOCKING="$CLB" "$PY" \
     --dataset.repo_id=local/v1 \
     --dataset.root="$DS_ROOT" \
     --policy.type=act \
@@ -97,24 +109,34 @@ for attempt in $(seq 1 "$ATTEMPTS"); do
     --policy.pretrained_path="$BASE" \
     --policy.push_to_hub=false --save_checkpoint_to_hub=false \
     --batch_size="$BATCH" --steps="$STEPS" --save_freq="$SAVE_FREQ" \
-    --num_workers="$W" ${B:+--dataset.video_backend="$B"} \
-    --output_dir="$OUT" --seed="$SEED" "${RESUME[@]}"
-  rc=$?
+    --num_workers="$W" ${BK:+--dataset.video_backend="$BK"} \
+    --output_dir="$OUT" --seed="$SEED" "${RESUME[@]}" 2>&1 | tee "$ALOG"
+  rc=${PIPESTATUS[0]}
   echo "=== attempt $attempt rc=$rc 已训=$(step_now)步  $(date +%H:%M:%S) ==="
   [ "$rc" -eq 0 ] && break
 
-  # 崩溃（139 SIGSEGV / 136 SIGFPE）→ 计数并决定是否降档；其它错误直接放弃（多半是参数/依赖）
-  if [ "$rc" -eq 139 ] || [ "$rc" -eq 136 ]; then
-    fails_here=$((fails_here + 1))
-    echo "  崩溃 rc=$rc（第 $fails_here/$ESCALATE_AFTER 次），已落 ckpt 会自动续跑"
-    if [ "$fails_here" -ge "$ESCALATE_AFTER" ] && [ "$stage" -lt 2 ]; then
-      stage=$((stage + 1))
-      fails_here=0
-      echo "  ⤵ 降档到 档$stage"
-    fi
-  else
-    echo "  非崩溃错误（rc=$rc），不重试；看上面的 traceback"
-    break
+  fails_here=$((fails_here + 1))
+  echo "  失败 rc=$rc（第 $fails_here/$ESCALATE_AFTER 次），日志留档 $ALOG"
+  # CUDA 侧错误（INTERNAL ASSERT / device-side assert / illegal memory access）：
+  # 进程反复 SIGSEGV 后会留下**粘滞的 CUDA context**，重启（或 nvidia-smi --gpu-reset）才清
+  if grep -qiE 'INTERNAL ASSERT|device-side assert|illegal memory access|CUDAGuardImpl' "$ALOG"; then
+    echo "  ⚠️ 这是 CUDA 侧错误（不是数据/编码问题）。先做两件事再看结果："
+    echo "     ① 重启机器（或 sudo nvidia-smi --gpu-reset）清掉粘滞的 CUDA context；"
+    echo "     ② 下一档会关掉 worker 并开 CUDA_LAUNCH_BLOCKING=1（定位到具体 kernel）"
+    cuda_hits=$((cuda_hits + 1))
+  fi
+  if [ "$fails_here" -ge "$ESCALATE_AFTER" ] && [ "$stage" -lt 3 ]; then
+    stage=$((stage + 1))
+    fails_here=0
+    echo "  ⤵ 降档到 档$stage"
+  fi
+  # GPU 侧出问题超过 2 次就打印驱动面证据，省得你再去翻
+  if [ "$cuda_hits" -ge 2 ]; then
+    echo "  --- 驱动面证据（贴给我就行）---"
+    nvidia-smi --query-gpu=name,driver_version,temperature.gpu,memory.used,utilization.gpu \
+               --format=csv 2>&1 | head -3
+    nvidia-smi -q 2>/dev/null | grep -iE 'Xid|Pending|Retired' | head -5
+    (journalctl -k -n 40 2>/dev/null || dmesg 2>/dev/null) | grep -iE 'xid|nvrm|nvidia' | tail -8
   fi
   sleep 5
 done

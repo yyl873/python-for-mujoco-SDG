@@ -43,6 +43,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--steps", type=int, default=200, help="每段跑多少步 forward+backward")
     ap.add_argument("--ckpt", default=CKPT)
+    ap.add_argument("--force-cpu", action="store_true",
+                    help="只验证本脚本自身逻辑（无显卡时用，结论作废）")
     a = ap.parse_args()
 
     import torch
@@ -52,16 +54,20 @@ def main() -> int:
     print("=" * 72)
     print(f"  torch          : {torch.__version__}")
     print(f"  cuda 可用      : {torch.cuda.is_available()}  设备数 {torch.cuda.device_count()}")
-    if not torch.cuda.is_available():
+    if a.force_cpu:
+        print("  （--force-cpu：只用 CPU 验证脚本自身的 A/B 两段能否跑通，结论不代表显卡）")
+    if not torch.cuda.is_available() and not a.force_cpu:
         print("  ★ 看不到显卡：这段必须在**你自己的终端**里跑（沙箱内 NVML 初始化失败）")
         return 2
-    print(f"  GPU            : {torch.cuda.get_device_name(0)}  "
-          f"capability {torch.cuda.get_device_capability(0)}")
-    print(f"  编译架构(arch) : {torch.cuda.get_arch_list()[:8]}{'...' if len(torch.cuda.get_arch_list()) > 8 else ''}")
+    if torch.cuda.is_available():
+        print(f"  GPU            : {torch.cuda.get_device_name(0)}  "
+              f"capability {torch.cuda.get_device_capability(0)}")
+        arch = torch.cuda.get_arch_list()
+        print(f"  编译架构(arch) : {arch[:8]}{'...' if len(arch) > 8 else ''}")
     print(f"  驱动(nvidia-smi): {sh('nvidia-smi --query-gpu=driver_version --format=csv,noheader')}")
     print(f"  CUDA_LAUNCH_BLOCKING = {sh('printenv CUDA_LAUNCH_BLOCKING') or '(未设)'}")
 
-    dev = torch.device("cuda:0")
+    dev = torch.device("cpu" if a.force_cpu else "cuda:0")
 
     # ---------------- A 段：纯计算 ----------------
     print()
@@ -79,7 +85,8 @@ def main() -> int:
             if not torch.isfinite(y):
                 print(f"  ★ 第 {i} 步出现非有限值 —— 数值面问题")
                 return 3
-        torch.cuda.synchronize()
+        if dev.type == "cuda":
+            torch.cuda.synchronize()
     except Exception as e:                                       # noqa: BLE001
         print(f"  ✗ A 段失败（{type(e).__name__}）：{e}")
         print("  → 纯计算都过不去 ⇒ 显卡/驱动面。请贴这两条的尾部：")
@@ -100,14 +107,16 @@ def main() -> int:
         from replay_policy import load_policy_config                # noqa: PLC0415
 
         cfg = load_policy_config(Path(a.ckpt))
-        cfg.device = "cuda"
+        cfg.device = str(dev)
         cls = get_policy_class(cfg.type)
         policy = cls.from_pretrained(str(a.ckpt), config=cfg).to(dev).train()
         imgs = [k for k in cfg.input_features if "images" in k]
         n_act = cfg.output_features["action"].shape[0]
-        batch = {"observation.state": torch.randn(8, 8, device=dev),
-                 "action": torch.randn(8, n_act, device=dev),
-                 "action_is_pad": torch.zeros(8, dtype=torch.bool, device=dev)}
+        chunk = int(getattr(cfg, "chunk_size", 100))      # ACT 的 action 是 (B, chunk, dim)
+        n_state = cfg.input_features["observation.state"].shape[0]
+        batch = {"observation.state": torch.randn(8, n_state, device=dev),
+                 "action": torch.randn(8, chunk, n_act, device=dev),
+                 "action_is_pad": torch.zeros(8, chunk, dtype=torch.bool, device=dev)}
         for k in imgs:
             shape = cfg.input_features[k].shape
             batch[k] = torch.rand(8, *shape, device=dev)
@@ -118,12 +127,17 @@ def main() -> int:
             for p in policy.parameters():
                 p.grad = None
             if i % 25 == 0:
-                torch.cuda.synchronize()
+                if dev.type == "cuda":
+                    torch.cuda.synchronize()
                 print(f"    step {i:4d}  loss={float(loss):8.4f}  "
                       f"{(i + 1) / max(1e-9, time.time() - t0):5.2f} step/s", flush=True)
-        torch.cuda.synchronize()
+        if dev.type == "cuda":
+            torch.cuda.synchronize()
     except Exception as e:                                       # noqa: BLE001
+        import traceback                                       # noqa: PLC0415
         print(f"  ✗ B 段失败（{type(e).__name__}）：{e}")
+        print("  --- 完整 traceback（贴给我用）---")
+        traceback.print_exc()
         print("  → 纯计算过了、模型算子过不去 ⇒ torch/lerobot 算子面。")
         print("      试 CUDA_LAUNCH_BLOCKING=1 复跑定位具体算子；仍崩就换 torch 轮子（cu128 起对 sm_120 支持更全）")
         return 4

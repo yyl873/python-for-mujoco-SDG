@@ -333,3 +333,25 @@ cd /home/yyl/deepseek-harness
 env -u PYTHONHOME -u PYTHONPATH /home/yyl/miniforge3/envs/lerobot312/bin/python \
     rl/probe_gpu_health.py --steps 200
 ```
+### 11.3 第三轮（22:06，GPU 侧换了一种崩法：CUDA INTERNAL ASSERT）
+
+续跑（从 `001250` 起、剩余 3750 步）跑到 **55 步**时报：
+`RuntimeError: d.is_cuda() INTERNAL ASSERT FAILED at "c10/cuda/impl/CUDAGuardImpl.h":34`，
+且进度条在同一行卡了约 20 s 才报错（2.93 → 1.19 step/s）。这是 **CUDA 侧**错误
+（`CUDAGuardImpl`），不是数据/编码/训练逻辑问题；同一进程此前已多次 SIGSEGV，
+反复崩会留下**粘滞的 CUDA context**，只有重启或 `nvidia-smi --gpu-reset` 才清。
+
+已排除的：`checkpoints/last/pretrained_model/train_config.json` 里 `policy.device=cuda`、
+`num_workers=4`、`steps=5000` 都正常（不是 resume 把设备/步数带坏）。
+
+脚本对应加固（`rl/run_lang_train.sh`）：
+- 档位阶梯扩到 4 档：档0 原样 → 档1 `workers=0` → 档2 `+pyav` → 档3 `+CUDA_LAUNCH_BLOCKING=1`；
+- **任何 rc≠0 都重试**（原来只重试 139/136，这条 CUDA assert 会直接放弃）；
+- 每次 attempt 的完整日志留 `rl/logs/attempt_N_HHMMSS.log`；
+- 识别到 CUDA 类错误自动打印驱动面证据（`nvidia-smi --query-gpu`、`Xid`/`Pending`/`Retired`、
+  `journalctl -k` 里的 nvrm/nvidia 行），省得再手翻；
+- `已训 >= STEPS` 时直接退出，不空跑。
+
+**并行兜底**：把 GPU 侧的 `001250` ckpt 复制到 `outputs/act_lang_dual_cpu/`（591 MB），
+用 CPU 续跑剩余 3750 步（6.0–6.5 s/step ≈ 6.5 h，`SAVE_FREQ=500`），不依赖 GPU 是否稳定。
+GPU 侧一旦跑通，直接用那边的 ckpt 评即可，两边互不影响（输出目录不同）。
