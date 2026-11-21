@@ -899,17 +899,39 @@ class Mp4Sink:
     所以批量采集默认 burn=False，只在 inspect 工具里用。
     """
 
-    def __init__(self, path, fps, size, burn=False, codec="avc1"):
+    def __init__(self, path, fps, size, burn=False, codec="h264"):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        fourcc = cv2.VideoWriter_fourcc(*str(codec))
-        self.vw = cv2.VideoWriter(str(self.path), fourcc, float(fps), size)
-        if not self.vw.isOpened():
-            raise RuntimeError(f"VideoWriter 打不开: {self.path}（codec={codec}）")
-        self.size = size
+        self.size = (int(size[0]), int(size[1]))
         self.burn = bool(burn)
         self.codec = str(codec)
         self.n = 0
+        # ★ 2026-11-21：编码器改走 pyav（进程内 libx264）。
+        #   原因：本机 cv2 的 FFMPEG 构建没有 libx264，`avc1` 直接 VideoWriter 打不开，
+        #   而训练侧要的是 h264（见本类文档）。pyav 15.x 自带 libx264，不再依赖外部 ffmpeg，
+        #   也不再依赖 cv2 的编解码构建。装了 pyav 就用 pyav，没有才回退到旧的 cv2 路径。
+        try:
+            import av                                          # noqa: PLC0415
+        except Exception:                                      # noqa: BLE001
+            av = None
+        self._av = av
+        if av is not None:
+            enc = {"avc1": "libx264", "h264": "libx264", "H264": "libx264",
+                   "mp4v": "mpeg4"}.get(self.codec, self.codec)
+            self._container = av.open(str(self.path), mode="w")
+            self._stream = self._container.add_stream(enc, rate=max(1, int(round(float(fps)))))
+            self._stream.width, self._stream.height = self.size
+            self._stream.pix_fmt = "yuv420p"
+            self._stream.options = {"crf": "23", "preset": "veryfast"}
+            self._backend = "pyav"
+            self.vw = None
+        else:
+            fourcc = cv2.VideoWriter_fourcc(*str(self.codec))
+            self.vw = cv2.VideoWriter(str(self.path), fourcc, float(fps), self.size)
+            if not self.vw.isOpened():
+                raise RuntimeError(f"VideoWriter 打不开: {self.path}（codec={self.codec}）"
+                                   "——本机 cv2 没有该编码器，且没装 pyav")
+            self._backend = "cv2"
 
     def write(self, rgb, tag):
         frame = rgb.copy() if rgb.flags.writeable else rgb
@@ -919,11 +941,25 @@ class Mp4Sink:
                         0.5, (255, 255, 255), 1, cv2.LINE_AA)
         if (frame.shape[1], frame.shape[0]) != self.size:
             frame = cv2.resize(frame, self.size)
-        self.vw.write(frame[:, :, ::-1])       # RGB -> BGR
+        if self._backend == "pyav":
+            # pyav 的 rgb24 就是要 RGB，和 MuJoCo 给的一致 → 不做 BGR 转换
+            vf = self._av.VideoFrame.from_ndarray(np.ascontiguousarray(frame, dtype=np.uint8),
+                                                  format="rgb24")
+            for pkt in self._stream.encode(vf):
+                self._container.mux(pkt)
+        else:
+            self.vw.write(frame[:, :, ::-1])   # RGB -> BGR（cv2 的约定）
         self.n += 1
 
     def close(self):
-        self.vw.release()
+        if self._backend == "pyav":
+            try:
+                for pkt in self._stream.encode():      # flush
+                    self._container.mux(pkt)
+            finally:
+                self._container.close()
+        else:
+            self.vw.release()
 
 
 # 老名字保留一行别名：老脚本/老日志里的 AviSink 现在其实就是 Mp4Sink（容器已换）。
@@ -1690,6 +1726,10 @@ def main(argv=None):
     ap.add_argument("--no-extrinsics", dest="extrinsics", action="store_false")
     ap.add_argument("--burn-counter", action="store_true",
                     help="视频左上角烧 'Env F:n' 帧号（调试用；训练数据不要开）")
+    ap.add_argument("--target-box", default="target_box",
+                    help="目标箱的 body 名（默认 target_box；VLA 空间指令实验用 target_box_b）。"
+                         "只是把专家剧本的 place/transport/retract 目标点换个箱子，"
+                         "不改任何物理参数")
     ap.add_argument("--instruction", default=DEFAULT_INSTRUCTION,
                     help="写进每条 meta 的自然语言指令（给 VLA 用；纯视觉可以无视）")
     ap.add_argument("--reset", action="store_true",
@@ -1784,7 +1824,7 @@ def main(argv=None):
               f"{index['n_rejected']}，接受率 {index['accept_rate']*100:.0f}%）")
         return rc
 
-    arm = R.Arm(R.SCENE_XML)          # 模型只加载一次，每条 episode 复用（省 0.2s/条）
+    arm = R.Arm(R.SCENE_XML, target_box=args.target_box)   # 模型只加载一次，每条 episode 复用（省 0.2s/条）
     nom = NominalGrasp(arm)           # 标定基准：三个接近路点 + pan 符号（只算一次）
     pad = PadZone(arm.m)              # 绿垫几何 + "整个 footprint 在垫上"的判据
     _PAN_CENTER.value = np.asarray(nom.center, float)   # 采样与同构解共用同一个旋转圆心

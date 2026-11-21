@@ -166,7 +166,14 @@ SUPPORT_BODIES = {"pick_zone", "table", "mousepad", "floor", "world"}
 class Arm:
     """封装模型的索引与基本操作, 避免全局变量。"""
 
-    def __init__(self, xml=SCENE_XML):
+    def __init__(self, xml=SCENE_XML, target_box: str = "target_box"):
+        """target_box: 目标箱的 body 名。
+
+        默认 "target_box"（旧链路行为不变）。VLA 空间指令实验里传 "target_box_b"，
+        专家轨迹的 transport / place / retract 三个目标点都是从 `self.tbox` 的 body_pos
+        推出来的（render/test_render.py 里 `bx = m.body_pos[a.tbox]`），
+        所以只要换这一处指针，整条专家轨迹就跟着换目标，不需要改剧本。
+        """
         self.m = mujoco.MjModel.from_xml_path(xml)
         self.d = mujoco.MjData(self.m)
         m = self.m
@@ -181,7 +188,10 @@ class Arm:
         self.obj = nid(mujoco.mjtObj.mjOBJ_BODY, "object")
         self.grip = nid(mujoco.mjtObj.mjOBJ_BODY, "gripper_link")
         self.jaw = nid(mujoco.mjtObj.mjOBJ_BODY, "jaw_link")
-        self.tbox = nid(mujoco.mjtObj.mjOBJ_BODY, "target_box")
+        if mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, target_box) < 0:
+            raise ValueError(f"场景里没有 body {target_box!r}")
+        self.tbox = nid(mujoco.mjtObj.mjOBJ_BODY, target_box)
+        self.tbox_name = str(target_box)
         self.obj_geom = nid(mujoco.mjtObj.mjOBJ_GEOM, "object_physics")
         self.oadr = m.jnt_qposadr[m.body_jntadr[self.obj]]
         # 夹爪关节的 qpos 地址（reset 时要按 keyframe 的值保持，不能写死 0）

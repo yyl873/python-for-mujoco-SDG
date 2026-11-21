@@ -126,6 +126,23 @@
       <geom name="box_front" type="box" size="0.0535 0.002 0.025" pos="0 -0.069 0" material="mat_box"/>
       <geom name="box_back" type="box" size="0.0535 0.002 0.025" pos="0 0.069 0" material="mat_box"/>
     </body>
+
+    <!-- 物品3：第二个目标盒子 target_box_b（2026-11-21 新增，VLA 空间指令实验用）
+         几何/材质与 target_box 完全一致，位置关于 y=0 镜像：
+           target_box   : (0.290, -0.132, 0.025)
+           target_box_b : (0.290, +0.132, 0.025)
+         IK 可达性已实测：末端误差 0.4 mm（ik/test_ik.solve_ik_to_xyz）。
+         ⚠️ scripts/ 里旧的 1000 条 episode 不含这个箱子 → 新旧数据不能混用。
+         旧链路默认仍看 target_box，行为不变。 -->
+    <body name="target_box_b" pos="0.206 0.245 0.025">
+      <inertial pos="0 0 -0.01" mass="0.045" diaginertia="6e-05 8e-05 1.2e-04"/>
+
+      <geom name="boxb_bottom" type="box" size="0.0575 0.071 0.002" pos="0 0 -0.023" material="mat_box"/>
+      <geom name="boxb_left" type="box" size="0.002 0.071 0.025" pos="-0.0555 0 0" material="mat_box"/>
+      <geom name="boxb_right" type="box" size="0.002 0.071 0.025" pos="0.0555 0 0" material="mat_box"/>
+      <geom name="boxb_front" type="box" size="0.0535 0.002 0.025" pos="0 -0.069 0" material="mat_box"/>
+      <geom name="boxb_back" type="box" size="0.0535 0.002 0.025" pos="0 0.069 0" material="mat_box"/>
+    </body>
     </worldbody>
 
   <!-- 让 MuJoCo 一启动就是指定的姿态。
