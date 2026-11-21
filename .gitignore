@@ -40,3 +40,5 @@ venv/
 
 # DAgger 纠正数据集（可重生成）
 /rl/dagger_ds/
+# 语言条件数据集副本（collect/export_lerobot.py 重生成；604 MB 视频，只留脚本不留数据）
+/rl/lang_ds/

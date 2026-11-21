@@ -128,9 +128,11 @@
     </body>
 
     <!-- 物品3：第二个目标盒子 target_box_b（2026-11-21 新增，VLA 空间指令实验用）
-         几何/材质与 target_box 完全一致，位置关于 y=0 镜像：
-           target_box   : (0.290, -0.132, 0.025)
-           target_box_b : (0.290, +0.132, 0.025)
+         几何/材质与 target_box 完全一致。
+         ★ 实际坐标以下面的 body pos 为唯一真身：** (0.206, +0.245, 0.025) **。
+           spec 里写的镜像位 (0.290, +0.132) 没有被采用（移动是为了让两箱在世界里
+           分得开、也避开第一箱的夹取走廊）；`rl/eval_lang.py` 的 BOX_XY 与采集时的
+           `--target-box target_box_b` 都用这个真实值，三方一致。
          IK 可达性已实测：末端误差 0.4 mm（ik/test_ik.solve_ik_to_xyz）。
          ⚠️ scripts/ 里旧的 1000 条 episode 不含这个箱子 → 新旧数据不能混用。
          旧链路默认仍看 target_box，行为不变。 -->

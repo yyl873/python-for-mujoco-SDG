@@ -203,3 +203,45 @@ python3 rl/eval_lang.py --ckpt <新 ckpt> --episodes 100-119 --seeds 2
 4. 评测集的 held-out 场景（episodes 100-129）在新场景下需要重新确认专家也能成功
    （新场景多了一个箱子，`scripts/` 里 100-129 的轨迹是单箱场景录的，**不能直接回放**）
    → 评测必须用**新采集的 held-out 编号段**（计划里另留 2400-2449 中的一部分作 held-out）。
+
+---
+
+## 11. 执行记录（2026-11-21 晚，实测）
+
+| 阶段 | 状态 | 实测数字 |
+|---|---|---|
+| 1 编码器（pyav/libx264） | ok | 采集 100 条，出 184 个 mp4（92 条正样本 × 2 相机 + 负样本） |
+| 2 第二箱 pilot | ok | 实际落地位置 **(0.206, +0.245, 0.025)**（不是 §5.1 的镜像位，见下） |
+| 3 采集 | ok | 编号段 2000–2099 采 100 条，**验收通过 92 条**（`.lang_ids.txt`），另 8 条 `reject_reasons` 非空 |
+| 4 数据集副本 | ok | `rl/lang_ds/v1`：**92 条 / 41922 帧 / 604 MB**；`observation.state` **8 维**（6 关节 + `instr_left`/`instr_right`）；`tasks.parquet` **2 行**；episodes 的 tasks 分布 **45 left / 47 right**；`meta/sim_provenance.json` 的 `task_order` 与 `tasks.parquet` 同序；回读 `len=41922 episodes=92 state(8,) action(6,) img=ok stats=ok`；**图像写入失败 0 条** |
+| 5 加宽基座 | ok | `act_sim156_lang8/pretrained_model`：config 的 state=8（补 0 列），ACT 可直接加载（52 M 参数，无 shape 冲突） |
+| 5 微调 5000 步 | **待执行（GPU）** | 沙箱不可见 `/dev/nvidia*`（`torch.cuda.is_available()=False`），且 `/home/yyl/lerobot` 在工作区外只读 → 只能在用户终端跑。CPU 实测 **6.5–8 s/步**（batch 8），5000 步 ≈ 9–11 h，不作为选项 |
+| 6 反事实评测 | 待执行 | 命令见下；判据预注册，不许看完数据再改 |
+
+**held-out 段已补采（本 spec §10.4 的硬要求）**：原默认 `--episodes 2060-2079` 里
+大部分 episode **已经进了训练集**（`--lang-onehot` 导出了全部 92 条），拿它当 held-out
+等于在训练场景上做反事实，跟准确率会被顶高。补采 **2400–2419**（左 10 + 右 10）：
+**19/20 验收通过**（2410 落 `no_grasp_candidate(3次)/no_lift(-17.6mm)/not_in_box`，
+与训练段 8 条被拒同一失败类），编号写在 `.lang_holdout_ids.txt`，
+母本/index/视频齐全（20 npz、38 mp4、20 个 index）。评测用这 19 条初始条件。
+
+**卡死根因（本次修掉）**：导出不是算错，是**进程随会话被 SIGTERM 带走**——第一次跑到
+`[57/92]`、`Error writing image` **0 条**、无 traceback 就断。修法：`setsid nohup ... < /dev/null &`
+起独立会话 + 用日志进度行轮询（`pgrep -f` 会探到自己的 cmdline）。复跑：**20:35:59 → 20:41:03，
+5 分 4 秒，92/92，rc=0**。
+
+**偏差记录（别再当成镜像位）**：`model/scene.xml` 里 `target_box_b` 的真实 `pos` 是
+`(0.206, 0.245, 0.025)`，不是 §5.1 选的镜像 `(0.290, +0.132)`。采集（`--target-box target_box_b`）
+与评测（`rl/eval_lang.py` 的 `BOX_XY`）都按真实值走，数据与判据自洽；但 §5.1 的"两箱几何镜像
+→ chance 基线干净"论证**不再严格成立**，报告里要注明 chance=50% 只是名义基线。
+
+**下一步命令（用户终端，有 GPU）**：
+```bash
+cd /home/yyl/deepseek-harness
+# 微调（≈17 min @ 0.2 s/step；输出 /home/yyl/lerobot/outputs/train/act_lang_dual）
+STEPS=5000 bash rl/run_lang_train.sh
+# 反事实评测：19 条训练集外场景 × 2 seed × 2 指令 = 76 条 rollout
+env -u PYTHONHOME -u PYTHONPATH MUJOCO_GL=egl .venv-rl/bin/python rl/eval_lang.py \
+    --ckpt /home/yyl/lerobot/outputs/train/act_lang_dual/checkpoints/last/pretrained_model \
+    --ds rl/lang_ds/v1 --episodes 2400-2409,2411-2419 --seeds 2
+```

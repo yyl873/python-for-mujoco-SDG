@@ -12,9 +12,15 @@
 #     compute_episode_stats 读 frame-000000.png 抛 FileNotFoundError）。
 #     同样的命令导 5 条是干净的 rc=0。每次换一个**全新的 DST** 重试，
 #     并统计 "Error writing image" 条数；条数必须是 0。
+#  ⑤ ★ 2026-11-21 20:41 定性：上面 ④ 不是逻辑 bug，是**进程被会话带走**——
+#     加 --streaming 后跑到 [57/92]、图像写入失败 **0 条**、无 traceback 就断了，
+#     因为 GUI/工具会话崩溃时会 SIGTERM 掉整组。用 ①的 setsid + nohup + </dev/null
+#     起独立会话后一次跑完：**92/92、rc=0、图像写入失败 0、5 分 4 秒**。
+#     探活改用日志里的 `[ k/92]` 进度行，不要用 pgrep -f（见 ②）。
 #
 # 用法：
-#   DST=rl/lang_ds/run1 setsid bash rl/run_lang_export.sh > .lang_export.log 2>&1 < /dev/null &
+#   DST=rl/lang_ds/v1 setsid nohup bash rl/run_lang_export.sh > .lang_export.log 2>&1 < /dev/null &
+#   慢不慢都别看进程：grep -oE "\[ *[0-9]+/92\]" .lang_export.log | tail -1
 set -u
 cd "$(dirname "$0")/.." || exit 1
 export MUJOCO_GL=egl OMP_NUM_THREADS=1 MPLCONFIGDIR=$PWD/.mplcache HF_HOME=$PWD/.cache/huggingface
