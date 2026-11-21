@@ -67,7 +67,8 @@ class ResidualSO101(gym.Env):
                  residual_deg: float = RESIDUAL_DEG, seed: int = 0,
                  width: int = 640, height: int = 480,
                  reward_version: str = "v1", judge: str = "legacy",
-                 pen_gate_mm: float = 20.8):
+                 pen_gate_mm: float = 20.8, jaw_min_deg: float = 0.0,
+                 target_radius_mm: float = 60.0, out_area_mm: float = 300.0):
         super().__init__()
         import mujoco                                    # noqa: PLC0415
         import test_render as R                          # noqa: PLC0415
@@ -94,13 +95,26 @@ class ResidualSO101(gym.Env):
         # judge: "legacy" = 旧的成功/失败判定（峰值抬升 / 只看倾角）；
         #        "strict" = 连续 5 步洁净成功 + 掉桌/出区判失败（罚 -30），用于堵住"撞翻早退"作弊
         assert reward_version in ("v1", "v2", "v2b"), reward_version
-        assert judge in ("legacy", "strict"), judge
+        assert judge in ("legacy", "strict", "target"), judge
         self.reward_version = reward_version
         # 抓取奖励的穿透门槛：取基座在 110 条 episode 上的 p90（14.2 中位数 / 20.8 p90）。
         # ★ 不能用脚本专家的 0.5 mm —— 实测 ACT 基座每条都压 10–22 mm，用 0.5 会让抓取奖励恒为 0
         #   （这正是 v2 那版训练失败的隐藏原因之一：grasp 项被掐死，只剩进展项和惩罚项）。
         self.pen_gate_mm = float(pen_gate_mm)
         self.judge = judge
+        # ★★ judge="target"（2026-11-20 新增）：旧 strict 判据有两处与任务本身矛盾 ——
+        #   ① `out_of_area = 横移 > 120 mm`，而任务要把药盒从 y=+0.107 搬到木盒 y=-0.132，
+        #      **水平距离 241 mm**（`test_render.REF_HDISP_MM=218` 也是这个量级）→ 任何真正完成
+        #      任务的轨迹都必然越过 120 mm 被判失败；
+        #   ② `clean` 要求倾角 ≤15°，但工具俯仰随 TCP 高度按 0.22°/mm 变化（lift/elbow/flex
+        #      三轴平行的几何结果），抬 100 mm 就必然 >22°。
+        #   实测：**脚本专家母本轨迹在 strict 判据下 0/3 通过**（倾角 23~33°、横移 125 mm）。
+        #   所以 target 判据改成"放进木盒区域"：横移不再当失败依据，倾角只在抓取-抬升段参与判定。
+        self.target_radius_mm = float(target_radius_mm)   # 药盒中心距木盒中心的允许水平误差
+        self.out_area_mm = float(out_area_mm)             # 真·飞出工作区（专家实测最大横移 250 mm）
+        # ★ 夹爪最小指令（度）：0 = 只把负指令（低于关节下限）钳到 0（修 bug）；
+        #   16.05 = 不许合过头（夹 15 mm 盒需要 0.28 rad ≈ 16.05°，标定 0.76 mm/度）。
+        self.jaw_min_deg = float(jaw_min_deg)
         self._prev_dist = 0.0
         self._lift_streak = 0
         self.action_space = spaces.Box(low=-self.residual_deg, high=self.residual_deg,
@@ -109,6 +123,8 @@ class ResidualSO101(gym.Env):
                                             shape=(OBS_DIM,), dtype=np.float32)
 
         self.arm = R.Arm(R.SCENE_XML)
+        _jid = mujoco.mj_name2id(self.arm.m, mujoco.mjtObj.mjOBJ_JOINT, "gripper_joint")
+        self._jaw_jid = int(_jid)
         self.rig = R.CameraRig(self.arm.m, width=width, height=height)
         self.m, self.d = self.arm.m, self.arm.d
 
@@ -154,6 +170,26 @@ class ResidualSO101(gym.Env):
             if m.geom_bodyid[c.geom1] != self.arm.obj and m.geom_bodyid[c.geom2] != self.arm.obj:
                 continue
             worst = max(worst, -float(c.dist))
+        return worst * 1000.0
+
+    def _pen_finger_mm(self) -> float:
+        """只统计 药盒 ↔ 夹爪两指 的穿透（mm）—— 这才是"把盒子夹穿"。
+
+        ★为什么要单独一个口径（2026-11-20 实测）：`_penetration_mm` 统计**所有**涉及药盒的接触，
+          里面最大的两项其实是 `target_box`（木盒）和 `table`（桌面），专家母本在抓取段就有
+          12.0 mm / 8.0 mm，而手指只有 3.1 mm。把两者混在一起会把"盒子压在桌上"算成"手指穿模"，
+          历史上"基座压盒 p50 14.2 mm"因此被高估。本函数只留 grip/jaw 两个 body。
+        """
+        worst = 0.0
+        for i in range(self.d.ncon):
+            c = self.d.contact[i]
+            b1 = int(self.m.geom_bodyid[c.geom1])
+            b2 = int(self.m.geom_bodyid[c.geom2])
+            if self.arm.obj not in (b1, b2):
+                continue
+            other = b2 if b1 == self.arm.obj else b1
+            if other in (self.arm.grip, self.arm.jaw):
+                worst = max(worst, -float(c.dist))
         return worst * 1000.0
 
     def _box_tilt_deg(self) -> float:
@@ -257,6 +293,13 @@ class ResidualSO101(gym.Env):
         self._prev_dist = float(np.linalg.norm(self.arm.tcp_pos() - self._obj0))
         self._lift_streak = 0
         self._ep_return = 0.0          # ★ 自己记 episode 回报（VecNormalize 会吃掉 info["episode"]）
+        # ---- target 判据用 ----
+        self._tbox_xy = self.d.xpos[self.arm.tbox].copy()[:2]   # 木盒中心（世界系）
+        self._placed_streak = 0
+        self._pen_grasp_max = 0.0       # 抓取-抬升段（lift<60 mm）的最大穿透（全接触口径）
+        self._pen_finger_grasp_max = 0.0  # 抓取-抬升段的手指级穿透（只看 grip/jaw）
+        self._tilt_grasp_max = 0.0      # 抓取-抬升段的最大倾角
+        self._at_target_ever = False
         self._ep_success = False
         return self._obs(), dict(episode_id=eid, task=self._task)
 
@@ -278,6 +321,14 @@ class ResidualSO101(gym.Env):
         else:
             action_il = self.base.act(state)
         target_deg = action_il + a                      # ★ 单尺度：残差直接就是最终幅度
+        # ★ 夹爪目标钳制（2026-11-20）：ACT 会输出超出关节范围的夹爪指令（实测最小 −1.6°，
+        #   而 gripper_joint 下限是 0°），等于叫夹爪死命顶死；实测这直接导致药盒被挤穿模
+        #   10~22 mm。jaw_min_deg>0 时不许可到该值以下 —— 夹 15 mm 药盒需要 0.28 rad ≈ 16.05°
+        #   （标定：指缝 ≈ 76·jaw_rad − 7.13 mm，0.76 mm/度，差 3° 就差 2.3 mm 夹紧量）。
+        _jlo, _jhi = self.m.jnt_range[self._jaw_jid]
+        target_deg[5] = float(np.clip(target_deg[5],
+                                      max(np.degrees(_jlo), self.jaw_min_deg),
+                                      np.degrees(_jhi)))
         d.ctrl[:] = self._ctrl_from_deg(self.arm, target_deg)
 
         step_dt = 1.0 / self.control_hz
@@ -306,8 +357,19 @@ class ResidualSO101(gym.Env):
         clean = bool(lift_mm >= 50.0 and n_con >= 2 and tilt <= 15.0)
         fell = bool(tilt > 45.0)
         off_table = bool((obj[2] - self._obj0[2]) < -0.02)      # 掉下桌（旧判定漏了这条）
-        out_of_area = bool(hdisp_mm > 120.0)                    # 推出工作区（旧判定当零惩罚截断）
         timeout = bool((d.time - self._t0) >= self.max_seconds)
+        # ---- target 判据的量（见 __init__ 里 judge="target" 的说明）----
+        dxy_target_mm = float(np.linalg.norm(obj[:2] - self._tbox_xy) * 1000.0)
+        at_target = bool(dxy_target_mm <= self.target_radius_mm
+                         and lift_mm <= 30.0)                   # 在木盒上方且已落下（不是还举着）
+        if lift_mm < 60.0:                                      # 抓取-抬升段才统计压盒/倾角
+            self._pen_grasp_max = max(self._pen_grasp_max, pen_mm)
+            self._tilt_grasp_max = max(self._tilt_grasp_max, tilt)
+            self._pen_finger_grasp_max = max(self._pen_finger_grasp_max, self._pen_finger_mm())
+        if self.judge == "target":
+            out_of_area = bool(hdisp_mm > self.out_area_mm)      # 真·飞出工作区（专家实测最大 250 mm）
+        else:
+            out_of_area = bool(hdisp_mm > 120.0)                 # 旧判定（保留以复现历史数字）
 
         if self.judge == "strict":
             # 成功必须"连续 5 个控制步（0.17 s）都洁净"，不接受单帧峰值
@@ -318,6 +380,18 @@ class ResidualSO101(gym.Env):
                 reward += 50.0
             if fail:
                 reward -= 30.0                                  # > v2 进展项整集上限(20)，堵住"撞翻早退"
+            terminated = bool(success or fail)
+            truncated = bool(timeout and not terminated)
+        elif self.judge == "target":
+            # ★ 成功 = 曾经抬起 ≥50 mm，且把药盒**放进木盒区域**并保持 5 步（0.17 s）
+            self._placed_streak = self._placed_streak + 1 if at_target else 0
+            self._at_target_ever = self._at_target_ever or at_target
+            success = bool(self._placed_streak >= 5 and self._max_lift >= 50.0)
+            fail = bool(off_table or out_of_area)               # 倾角不再判失败（几何必然）
+            if success:
+                reward += 50.0
+            if fail:
+                reward -= 30.0
             terminated = bool(success or fail)
             truncated = bool(timeout and not terminated)
         else:                                                   # legacy：复现旧结论用
@@ -342,6 +416,10 @@ class ResidualSO101(gym.Env):
                            ep_end_success=self._ep_success)
 
         info = dict(lift_mm=lift_mm, max_lift_mm=float(self._max_lift),
+                    dxy_target_mm=dxy_target_mm, at_target=at_target,
+                    pen_grasp_max_mm=float(self._pen_grasp_max),
+                    pen_finger_grasp_max_mm=float(self._pen_finger_grasp_max),
+                    tilt_grasp_max_deg=float(self._tilt_grasp_max),
                     hdisp_mm=hdisp_mm, contact_n=n_con, penetration_mm=pen_mm,
                     box_tilt_deg=tilt, success=success, episode_id=self._episode_id,
                     lift_streak=self._lift_streak, clean=clean,

@@ -55,7 +55,7 @@ def wilson(k: int, n: int, z: float = 1.96):
 
 
 def run_episode(env, policy, *, max_steps=None, video=None, fps=30, width=640, height=480,
-                res_scale=1.0):
+                res_scale=1.0, judge="strict"):
     """跑一条 episode。policy=None 表示纯基座（残差=0）。
 
     res_scale：**消融用**的残差幅度缩放。不改权重、不改动作空间，只把 SAC 输出的残差
@@ -121,14 +121,21 @@ def run_episode(env, policy, *, max_steps=None, video=None, fps=30, width=640, h
         if sink is not None:
             sink.release()
     success = bool(info["success"])
-    # 洁净成功：抬升/接触/倾角/持续性都过（穿透另算，门槛取基座 p90=20.8 mm，见 rl/audit_hack.py）
-    clean_success = bool(success and tilt_max <= 15.0 and streak_max >= 5)
+    # 洁净成功：口径随 judge 走。
+    #   strict/legacy：抬升/接触/倾角/持续性都过（历史口径；倾角 ≤15° 在抬升段物理不可达，见报告 §16）
+    #   target       ：成功 且 **抓取段手指穿透 ≤10 mm**（专家母本实测 3.1/8.9 mm，ACT 8~23 mm）
+    if judge == "target":
+        clean_success = bool(success and float(info.get("pen_finger_grasp_max_mm", 99.0)) <= 10.0)
+    else:
+        clean_success = bool(success and tilt_max <= 15.0 and streak_max >= 5)
     return dict(success=success, steps=steps,
                 lift_mm=round(float(lift_max), 2),
                 hdisp_mm=round(float(info["hdisp_mm"]), 2),
                 G2c_pen_pre_lift_mm=round(float(pen_pre_lift), 3),
                 G3c_tilt_pre_lift_deg=round(float(tilt_pre_lift), 2),
                 G6c_pen_max_mm=round(float(pen_max), 3),
+                pen_finger_grasp_max_mm=round(float(info.get("pen_finger_grasp_max_mm", 0.0)), 3),
+                dxy_target_mm=round(float(info.get("dxy_target_mm", -1.0)), 2),
                 end_reason=end_reason, tilt_max_deg=round(float(tilt_max), 2),
                 lift_streak_max=int(streak_max), clean_success=clean_success)
 
@@ -147,8 +154,12 @@ def main(argv=None) -> int:
     ap.add_argument("--video", default=None, help="给一条 episode 录像")
     ap.add_argument("--video-tag", default="base+R", choices=["base", "base+R"],
                     help="录像录哪一臂（默认 base+R；录基座要配 --video-tag base 且不给 --policy）")
-    ap.add_argument("--judge", default="legacy", choices=["legacy", "strict"],
-                    help="成败判定口径（必须与训练时一致才可比）：legacy=旧；strict=连续5步洁净成功+掉桌判失败")
+    ap.add_argument("--judge", default="legacy", choices=["legacy", "strict", "target"],
+                    help="成败判定口径：legacy=旧；strict=连续5步洁净成功(历史口径，与任务矛盾，见报告 §16)；"
+                         "target=抬升≥50mm 且把药盒放进木盒区域（推荐）")
+    ap.add_argument("--jaw-min-deg", type=float, default=0.0,
+                    help="夹爪最小指令（度）。0=只把负指令钳到 0（修 bug）；16.05=不许合过头"
+                         "（夹 15 mm 盒需要 0.28 rad，标定 0.76 mm/度）")
     ap.add_argument("--reward", default="v1", choices=["v1", "v2", "v2b"],
                     help="奖励版本（只影响 env 内部回报，不影响成败判定；用于与训练配置一致）")
     ap.add_argument("--res-scale", type=float, default=1.0,
@@ -220,7 +231,8 @@ def main(argv=None) -> int:
         env = ResidualSO101(base_name=a.base, device=a.device, episode_pool=tuple(pool),
                             swap_cams=a.swap_cams, use_sensor=not a.no_sensor,
                             max_seconds=a.max_seconds,
-                            judge=a.judge, reward_version=a.reward)
+                            judge=a.judge, reward_version=a.reward,
+                            jaw_min_deg=a.jaw_min_deg)
         try:
             for eid in pool:
                 for s in range(a.seeds):
@@ -232,7 +244,8 @@ def main(argv=None) -> int:
                     env.episode_pool = (eid,)          # ★ 只改 pool，别动 _episodes（否则下一条 KeyError）
                     env.reset(seed=s)
                     t0 = time.time()
-                    rec = run_episode(env, policy, video=vid, res_scale=a.res_scale)
+                    rec = run_episode(env, policy, video=vid, res_scale=a.res_scale,
+                                      judge=a.judge)
                     rec.update(tag=tag, episode_id=eid, seed=s, wall_s=round(time.time() - t0, 1))
                     rows.append(rec)
                     print(f"  {tag:6s} ep{eid} s{s}  {'✅' if rec['success'] else '❌'}  "
