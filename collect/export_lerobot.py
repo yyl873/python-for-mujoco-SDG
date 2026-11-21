@@ -133,6 +133,30 @@ def episode_arrays(e, src: Path, units: str, gripper_space: str = "sim",
 # 写 lerobot 数据集
 # ---------------------------------------------------------------------------
 
+def _make_encoder(args):
+    """数据集视频编码器。
+
+    ★ 默认的 `libsvtav1` 在本机导出 92 条时于第 3 条 **段错误（rc=139）**，
+      没有 traceback、不清空已写内容，看起来像"跑完了"。采集侧用 pyav libx264
+      编码了 100 条 / 8.7 万帧零崩溃，所以这里把编码器做成可选的，默认仍是
+      av1（与既有 sim156 数据集一致），出问题时换 `--vcodec h264`（h264 映射到本机编译的 libx264）。
+    """
+    from lerobot.configs.video import RGBEncoderConfig       # noqa: PLC0415
+    kw = {}
+    if args.vcodec:
+        kw["vcodec"] = args.vcodec
+        if args.vcodec in ("h264", "libx264") and not args.preset:
+            kw["preset"] = "veryfast"       # x264 的 preset 名；不给就走 x264 默认 medium
+    if args.crf is not None:
+        kw["crf"] = args.crf
+    if args.preset:
+        try:
+            kw["preset"] = int(args.preset)          # svt-av1 要整数
+        except ValueError:
+            kw["preset"] = args.preset               # x264 要字符串
+    return RGBEncoderConfig(**kw) if kw else None
+
+
 def build_features(h, w, state_names=None):
     """state_names: 额外的 state 列名（语言条件实验用：指令 one-hot）。
     给 None 时就是原来的 6 维关节角。"""
@@ -172,6 +196,17 @@ def main(argv=None) -> int:
                     help="把每条 episode 的 instruction 做成 one-hot 拼到 observation.state 末尾"
                          "（6 维关节角 + N 维指令）。用于语言条件 ACT："
                          "state 6->6+N，action 仍是 6 维。N = 本批里不同 instruction 的个数。")
+    ap.add_argument("--vcodec", default=None,
+                    help="数据集视频编码器（默认 None = lerobot 的 libsvtav1）。"
+                         "本机 av1 导出会段错误时换成 h264")
+    ap.add_argument("--crf", type=int, default=None, help="视频质量（默认 lerobot 的 30）")
+    ap.add_argument("--preset", default=None, help="编码 preset（svt-av1 整数 / x264 名字）")
+    ap.add_argument("--streaming", action="store_true",
+                    help="用 lerobot 的 streaming_encoding：帧直接喂给编码器，"
+                         "不在 images/ 下写临时 PNG。全量导出时用这个——"
+                         "走默认路径时 images/<cam>/episode-00000X/ 会在写帧中途被删掉，"
+                         "报 317 条 'Error writing image ... No such file or directory'，"
+                         "接着 compute_episode_stats 读 frame-000000.png 直接 FileNotFoundError")
     ap.add_argument("--units", choices=["deg", "rad"], default="deg",
                     help="state/action 单位（默认 deg，与 SO-101 真机数据集一致）")
     ap.add_argument("--episodes", default=None, help="只导这些编号，如 0,3,7（默认全部正样本）")
@@ -301,8 +336,11 @@ def main(argv=None) -> int:
 
     ds = LeRobotDataset.create(repo_id=repo_id, fps=int(round(fps)),
                                features=features, root=dst,
-                               robot_type=args.robot_type)
-    print(f"  建库    : {repo_id}  {w}x{h} @ {fps:.0f}fps  特征 {list(features)}")
+                               robot_type=args.robot_type,
+                               rgb_encoder=_make_encoder(args),
+                               streaming_encoding=bool(args.streaming))
+    print(f"  建库    : {repo_id}  {w}x{h} @ {fps:.0f}fps  特征 {list(features)}"
+          + ("  [streaming_encoding=开，帧直送编码器、不落 PNG]" if args.streaming else ""))
 
     t0 = time.time()
     done = 0

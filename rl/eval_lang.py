@@ -240,6 +240,7 @@ def main(argv=None) -> int:
     summary = dict(
         n_rollouts=len(rows), n_landed_in_some_box=n,
         follow_correct=k, follow_acc=round(k / n, 4) if n else None,
+        follow_acc_itt=round(k / len(rows), 4) if rows else None,
         follow_wilson=[round(lo, 4), round(hi, 4)],
         binom_p_vs_chance=round(p_binom, 5),
         n_pairs=len(pairs), pairs_both_follow=both_ok,
@@ -258,6 +259,10 @@ def main(argv=None) -> int:
           f"{100 * k / n if n else 0:.1f}%  Wilson [{100 * lo:.0f}%, {100 * hi:.0f}%]  "
           f"chance=50% 二项检验 p={p_binom:.4g}")
     print(f"    配对全对      : {both_ok}/{any_landed}（同场景两条都跟随才有意义）")
+    print(f"    跟随率(ITT)   : {k}/{len(rows)} = "
+          f"{100 * k / len(rows) if rows else 0:.1f}%"
+          "（分母含全部 rollout；判据用的是上面那个 excl-失败 的口径，"
+          "两个差得远说明模型只在简单场景里跟对）")
     print(f"    判定          : {summary['verdict']}")
     print(f"    （判据：follow_acc ≥80% 且 Wilson 下界 >50%）")
 
