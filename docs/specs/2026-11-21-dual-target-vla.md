@@ -1,0 +1,205 @@
+# spec：双目标箱空间 grounding（A′）—— 让 ACT 学会"按指令把药盒放进哪个箱子"
+
+- 日期：2026-11-21
+- 状态：**待确认**（确认后才写 plan、才动代码）
+- 取代：`2026-11-21-lang-cond-act.md` 的阶段 2（B：`timing_scale` 行为指令，天花板仅 ±10%，
+  用户已选择放弃）；**该文档的阶段 1（pyav 视频编码器修复）原样继承为本 spec 阶段 1**
+- 未执行：`2026-11-21-compute-parity-retest.md`（残差 RL 算力对等复测）
+
+---
+
+## 1. 问题
+
+项目没有语言输入，而现有数据里语言是**常数**（1000/1000 都是同一句 instruction），
+所以"加文本编码器"在当前数据上等于喂常量，不构成 VLA。
+
+要做出**可检验**的语言条件，必须让同一个场景里存在**两个合理的放置目标**，
+并且**只有指令能区分它们**。本 spec 就做这件事：场景里放两个目标箱，指令说左还是右。
+
+**为什么不用"速度指令"（上一个 spec 的 B）**：`timing_scale` 只有 0.90–1.099（±10%），
+行为差异太小，很可能既学不出也测不出，天花板太低。空间目标则是一个**二元可判**的指标。
+
+## 2. 目标 / 非目标
+
+**目标**
+1. **G1 修视频编码器**：`collect/collect.py` 在本机能产出 h264（pyav libx264），
+   验收 = 1 条 episode 出 2 个 mp4、各 436 帧、pyav 可解码、lerobot 可读。
+2. **G2 场景加第二个目标箱**：`target_box_b`，候选位置 `[0.29, +0.132, 0.025]`（镜像），
+   **IK 实测可达（末端误差 0.4 mm）**。
+3. **G3 目标参数化**：专家脚本 / 环境 / 判据都从"按名字查 `target_box`"升级为"按参数选目标箱"，
+   **默认值仍是 `target_box`**（旧链路行为不变）。
+4. **G4 采两个任务的数据**：每任务 **250 条**，共 **500 条**，同一新场景、指令分别为
+   "…into the **left/right** wooden box"。
+5. **G5 语言条件 ACT**：指令向量拼进 `observation.state`（6 → 8，两箱 one-hot），
+   用 `sim156` 基座微调，**不改 lerobot 源码**。
+6. **G6 反事实评测（核心）**：同一 `episode_id/seed`、同一场景，**只换指令**，
+   主指标 = **指令跟随准确率**（放进的箱子是否等于指令指定的箱子），
+   **chance = 50%**。
+
+**非目标**
+- 速度/风格条件化（已放弃）
+- CLIP / 外部文本模型（无网络、无本地权重）
+- 三箱以上、或"抓哪个物体"类指令（先只做放置目标这一维）
+- 真机、残差 RL、算力对等复测
+- 改动 `scripts/`、现有 `sim156` 基座、现有 LeRobot 数据集原件
+
+## 3. 现状与证据（本次实测，非估算）
+
+| 事实 | 值 | 出处 |
+|---|---|---|
+| 现有目标箱 | `target_box` @ `[0.29, −0.132, 0.025]` | `model/scene.xml:119` |
+| 第二个箱候选位置可达性 | 镜像 `[0.29,+0.132,0.06]` → **IK 误差 0.4 mm**；`[0.24,+0.132]` 0.8 mm；`[0.34,+0.132]` 0.4 mm；`[0.36,−0.132]` 0.5 mm | `ik/test_ik.solve_ik_to_xyz` 实测 |
+| 专家如何定位目标 | **按名字**：`mujoco.mj_name2id(..., "target_box")` | `grasp/test_grasp.py:184` |
+| 环境/判据如何定位目标 | `self.arm.tbox` → `_tbox_xy` | `rl/env_residual.py` |
+| 单条物理+专家 | **0.71 s** | `collect.py --no-render` 实测 |
+| 每 episode 帧数 | **436 grab = 872 帧**（640×480 × 2 相机） | `ep_000000.json` |
+| 单次 grab | 199–299 ms | `test_render.CameraRig.grab` 基准 |
+| 渲染并行扩展 | 12 进程饱和 **~5.2×**（17.4 grab/s） | 12 进程并发基准 |
+| **500 条采集预算** | **~3.5 h**（12 进程） | 500×436 / 17.4 |
+| 视频编码 | `cv2` 无 libx264；**`pyav 15.1.0` 可编 libx264（实测）**；conda ffmpeg 有 libx264 | 本机实测 |
+| 网络 / 文本模型 | 均不可用（无网络、HF 缓存空、无 tokenizer.json） | 实测 |
+| LeRobot 每 episode 独立 task | **支持**：`meta/episodes/*.parquet` 有 per-episode `tasks` 列 | 数据集元数据 |
+| ACT 接受任意 state 维度 | **支持**：`modeling_act.py:415/467` 按 `input_features[OBS_STATE].shape` 建投影层 | lerobot 源码 |
+| 旧数据（1000 条）的场景 | **只有 1 个木箱** | `video_frames`/MJCF |
+
+## 4. 约束
+
+1. **数据不能混用旧场景**：加了第二个箱子之后，旧 1000 条的图像里没有它。
+   混用会让"同一指令对应两种视觉场景"，所以**训练集必须是新场景重采的 500 条**。
+   旧 1000 条只作为**回归对照**（单箱场景下基座 86.7% 的历史数字），不参与训练。
+2. **离线**：指令编码必须确定性（两箱 one-hot 2 维），不依赖网络/权重。
+3. **不改 lerobot**：指令向量 concat 进 `observation.state`（6→8）；CVAE 也会吃到它（期望行为）。
+4. **默认参数不变**：专家/环境/判据的默认目标仍是 `target_box` → 旧链路（`eval_ab`、`view_policy`、
+   残差训练）行为不受影响。
+5. **不动原件**：新数据集写 `rl/lang_ds/dual/`；`scripts/` 只读（新数据用 `--start 2000+` 或独立目录）。
+6. **样本量**：每任务 250 条（ACT 在 ~50 条就能学单任务；DAgger 那轮 480 条即够微调）。
+
+## 5. 备选方案与取舍
+
+### 5.1 第二个箱的位置
+
+| 候选 | IK 误差 | 取舍 |
+|---|---|---|
+| **镜像 `[0.29, +0.132, 0.025]`** | 0.4 mm | **选它**：视觉上左右分明，最像"空间指令"；两箱关于 y=0 对称，chance 基线干净 |
+| 同侧 `[0.36, −0.132, 0.025]` | 0.5 mm | 前后/远近区分，语言上是 "front/back"，不如左右直观 |
+| `[0.24, +0.132]` | 0.8 mm | 与现有箱投影重叠风险更高，放弃 |
+| `[0.34, +0.132]` | 0.4 mm | 也可用；先按镜像做，pilot 不行再换 |
+
+> ⚠️ IK 可达 ≠ 专家能完成任务。**pilot 必须实测专家成功率**（见 §9 阶段 2），
+> 不通过就换位置，这是本 spec 最大的技术风险。
+
+### 5.2 数据规模
+
+| | 做法 | 渲染成本 | 取舍 |
+|---|---|---|---|
+| **A** | 新场景重采 **500 条**（每任务 250） | **~3.5 h** | **选它**。样本量与 DAgger 那轮同量级，够微调 |
+| B | 重采 1000 条（每任务 500） | ~7 h | 更稳但翻倍；收益不确定 |
+| C | 旧 1000 条当任务 A + 新采 500 条当任务 B | ~3.5 h | **拒绝**：旧数据图像里没有第二个箱子，观测不一致 |
+| D | 只采 200 条（每任务 100） | ~1.4 h | 可作为 pilot 规模；正式训练可能欠拟合 |
+
+### 5.3 语言编码
+
+| | 做法 | 取舍 |
+|---|---|---|
+| **A** | 两箱 **one-hot 2 维** 拼进 `observation.state`（6→8） | **选它**。离线、可复现、零侵入 |
+| B | 手工语义特征 `[is_left, is_right]` | 与 A 等价（one-hot 就是它），不必分开 |
+| C | 指令字符串哈希 | 拒绝：无语义结构，换任务要重来 |
+| D | CLIP | 不可行（无网络/无权重）；**有网络后把 2 维换成 384 维嵌入，其余管线不变** |
+
+> 诚实标注：one-hot 是**受控的指令标识**，不是"语言理解"。它能回答的问题是
+> **"策略是否真的按指令走"**（可检验、可反事实），不能声称"理解了同义句/未见组合"。
+
+## 6. 选定方案
+
+**5.1-A（镜像）+ 5.2-A（500 条）+ 5.3-A（one-hot 2 维）**，分六个阶段（见 plan）。
+
+## 7. 接口 / 数据 / 文件变化
+
+| 文件 | 变化 | 兼容性 |
+|---|---|---|
+| `model/scene.xml` | **新增** `target_box_b` body（镜像位置，同几何同材质） | 旧 episode 不含它 → 只影响新采集 |
+| `collect/collect.py` | ①`_VideoWriter` 换 pyav ②新增 `--target-box`（默认 `target_box`） | 默认行为不变 |
+| `grasp/test_grasp.py` | 目标箱 id 由名字参数化（默认 `target_box`） | 默认行为不变 |
+| `rl/env_residual.py` | 新增 `target_body` 参数；`_tbox_xy`/判据跟着走 | 默认 `target_box` |
+| `rl/eval_ab.py` | 新增 `--target-box`、`--instruction`（转发给 env） | 默认不变 |
+| `rl/relabel_tasks.py` | **新增**：生成 `rl/lang_ds/dual`（3 或 2 条 task + state 6→8 + 重算 stats） | 新目录 |
+| `rl/eval_lang.py` | **新增**：反事实指令评测（同场景换指令） | 新文件 |
+| `rl/lang_ds/dual/`、`rl/eval/lang_*.json` | **新增产物** | 不覆盖原件 |
+| `/home/yyl/lerobot/outputs/train/act_lang_dual/` | **新增** ckpt | 不动 `act_dagger_ft_1000` |
+
+## 8. 失败模式与回滚
+
+| 风险 | 症状 | 处理 |
+|---|---|---|
+| **R1 专家放不进第二个箱** | pilot 采集 `accepted=false` / `reject_reasons` 非空 | 换位置（`[0.34,+0.132]` / `[0.36,−0.132]`）或调整箱高；**连换 3 个位置都不行 → 停止，回到 spec** |
+| **R2 两箱互相干扰** | 搬运途中手臂撞到另一个箱 → `off_table`/接触违规上升 | 加大两箱间距（镜像 y 改 ±0.15）；pilot 必测 |
+| R3 state 扩维后 stats 不匹配 | loss 不降或 NaN | `relabel_tasks.py` 显式重算 stats，训练前打印核对 |
+| R4 pyav 写的 mp4 lerobot 读不了 | 数据集校验失败 | 阶段 1 验收包含"lerobot 读回并解码一帧" |
+| R5 指令与视觉共线（模型靠图像而非指令） | 换指令后行为不变 | **这正是核心评测**：同场景换指令；若跟随准确率 ≈50% → 如实判"未使用语言" |
+| R6 微调把单任务能力带坏 | 新 ckpt 在两个箱都要求"任一"时也不如基座 | 附带回归：跑 30 次原始单箱场景，clean 不得比基座低 >15pp |
+| R7 采集被 SIGFPE 打断 | 进程崩 | 沿用 `--start` 续跑 + 外层重试（脚本里写死） |
+
+**回滚**：
+```bash
+git checkout -- model/scene.xml collect/collect.py grasp/test_grasp.py rl/env_residual.py rl/eval_ab.py
+rm -rf rl/lang_ds/dual rl/eval/lang_* /home/yyl/lerobot/outputs/train/act_lang_dual
+rm -f scripts/ep_0020*.{npz,json} videos/ep_0020*_*.mp4     # 新采集（编号段专属）
+```
+
+## 9. 验收标准（可执行 + 可观察）
+
+**阶段 1：编码器**
+```bash
+env -u PYTHONHOME -u PYTHONPATH MUJOCO_GL=egl .venv-rl/bin/python collect/collect.py \
+    --n 1 --start 9000 --no-keep-failed
+# 通过：videos/ep_009000_env.mp4 与 _wrist.mp4 都在；pyav 打开后 frames == 436
+# 失败：仍报编码器错误 / 帧数不符 → 停
+```
+
+**阶段 2：第二箱 pilot（**决定 A′ 是否可行**）**
+```bash
+# 每目标各采 5 条
+... collect.py --n 5 --start 2010 --target-box target_box_b --instruction "...right..."
+# 通过：5 条全部 accepted=true，且 place 阶段无 reject；两箱间距下无异常接触
+# 失败：见 R1/R2 → 换位置重试，最多 3 个位置
+```
+
+**阶段 3：正式采集 500 条（~3.5 h，12 进程）**
+```bash
+# 250 条 target_box（left）+ 250 条 target_box_b（right），编号段 2000-2499
+# 通过：scripts/ep_002*.json 共 500 个，accepted 率 ≥ 90%，两档各 250
+# 失败：accepted < 90% → 先查 reject_reasons，不许直接拿去训
+```
+
+**阶段 4：数据集副本**
+```bash
+python3 rl/relabel_tasks.py --out rl/lang_ds/dual
+# 通过：tasks.parquet 2 行；episodes 的 tasks 出现 2 种取值（各 250）；
+#      observation.state 维度 6→8；stats.json state 长度 8
+```
+
+**阶段 5：微调（≤5000 步）**
+```bash
+lerobot-train --policy.type=act --policy.pretrained_path=<sim156> --steps 5000 --batch_size 8
+# 通过：ckpt 落盘、loss 与 DAgger 微调同量级；不爆 NaN
+```
+
+**阶段 6：反事实评测（本 spec 核心，判据预注册）**
+```bash
+python3 rl/eval_lang.py --ckpt <新 ckpt> --episodes 100-119 --seeds 2
+# 主指标：指令跟随准确率 = 放进"指令指定箱"的次数 / 总次数
+# 通过（语言生效）：配对跟随准确率 ≥ 80%，且 Wilson 95% 下界 > 50%（chance）
+# 次级（不崩能力）：正确指令下的 succ ≥ 单箱基座 86.7% − 10pp = 76.7%
+# 不通过：跟随准确率 ≈ 50%（≈ 抛硬币）→ 判"语言未被使用"，负结果写进报告，禁止改判据
+```
+
+## 10. 开放问题
+
+1. 两箱的**视觉区分度**够不够？材质/颜色是否要不同（`material` 已可参数化）——
+   若两箱长得一样，模型可能只能靠位置区分，而不是靠"指令 + 空间关系"。pilot 后决定是否给第二个箱换材质。
+2. 500 条（每任务 250）是否足够？若 loss 收敛慢或跟随准确率低，再加 250 条（+1.75 h）。
+3. 指令文本措辞：`"...into the left/right wooden box"` 还是
+   `"...into the wooden box on the left/right"`——对 one-hot 编码无差别，但要写进数据卡。
+4. 评测集的 held-out 场景（episodes 100-129）在新场景下需要重新确认专家也能成功
+   （新场景多了一个箱子，`scripts/` 里 100-129 的轨迹是单箱场景录的，**不能直接回放**）
+   → 评测必须用**新采集的 held-out 编号段**（计划里另留 2400-2449 中的一部分作 held-out）。
