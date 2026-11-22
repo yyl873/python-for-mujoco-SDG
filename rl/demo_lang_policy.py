@@ -415,101 +415,114 @@ def banner(img: np.ndarray, text: str, color=(255, 255, 255)) -> np.ndarray:
 
 
 # ---------------------------------------------------------------- 主流程
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--ckpt", required=True, help="明确 ckpt 目录（checkpoints/005000/pretrained_model）")
-    ap.add_argument("--ds", default=str(ROOT / "rl" / "lang_ds" / "v2_pair"),
-                    help="数据集（读 task_order；必须与训练一致）")
-    ap.add_argument("--instr", choices=("left", "right"), default=None)
-    ap.add_argument("--text", default=None, help="自由文本指令（关键词判定左右）")
-    ap.add_argument("--mic", action="store_true", help="用麦克风说话给指令")
-    ap.add_argument("--mic-seconds", type=float, default=3.0)
-    ap.add_argument("--calibrate", action="store_true",
-                    help="录 6 次做声纹标定（不需要任何 ASR；之后 --mic 用最近邻判定）")
-    ap.add_argument("--save-wav", action="store_true", help="把这次麦克风波形存 rl/eval/last_mic.wav")
-    ap.add_argument("--live", nargs="?", const="auto", default=None,
-                    choices=("auto", "window", "browser"),
-                    help="实时观看：auto=先试 cv2 窗口，不行自动用浏览器 MJPEG；window/browser 强制")
-    ap.add_argument("--live-port", type=int, default=8765)
-    ap.add_argument("--no-play", dest="play", action="store_false", help="跑完不要自动播放视频")
-    ap.add_argument("--realtime", action="store_true", help="按真实时间步进（默认全速计算）")
-    ap.add_argument("--episode", type=int, default=2400)
-    ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--max-seconds", type=float, default=15.0)
-    ap.add_argument("--out", default=str(ROOT / "rl" / "eval" / "demo_lang.mp4"))
-    ap.add_argument("--fps", type=float, default=15.0, help="出片帧率（每 1/fps 秒抓一帧）")
-    ap.add_argument("--views", choices=("side", "env", "wrist"), default="side")
-    a = ap.parse_args()
-
-    order = task_order_from_ds(Path(a.ds) if a.ds else None)
-    if a.calibrate:
-        calibrate(order, a.mic_seconds)
-        return 0
+def get_instruction(a, order, rnd: int) -> tuple[int, str]:
+    """取这一轮的指令。--instr/--text 固定；--mic 每轮重新听；--alternate 左右交替。"""
+    if a.alternate and not a.mic:
+        ix = rnd % 2
+        return ix, f"轮换 #{rnd}"
     if a.instr:
-        ix = order.index(next(t for t in order if a.instr in t.lower()))
-        said = f"--instr {a.instr}"
-    elif a.text:
-        ix = pick_index(a.text, order)
-        said = f'"{a.text}"'
-    elif a.mic:
+        return order.index(next(t for t in order if a.instr in t.lower())), f"--instr {a.instr}"
+    if a.text:
+        return pick_index(a.text, order), f'"{a.text}"'
+    if a.mic:
         ix, said = listen_mic(a.mic_seconds, order, a.save_wav)
-        said = f'🎤 "{said}"'
-    else:
-        raise SystemExit("三选一：--instr left|right / --text \"...\" / --mic")
+        return ix, f'🎤 "{said}"'
+    raise SystemExit("三选一：--instr left|right / --text \"...\" / --mic")
+
+
+def make_env(a, order):
+    from env_residual import ResidualSO101                          # noqa: PLC0415
+
+    return ResidualSO101(base_name=a.ckpt, episode_pool=(a.episode,),
+                         max_seconds=a.max_seconds, judge="target",
+                         instr_onehot=np.zeros(len(order), np.float32),
+                         device="cpu", seed=a.seed)
+
+
+def glfw_probe() -> tuple[bool, str]:
+    """开窗前先在**子进程**里试建一个 64x64 的 GLFW 窗口。
+
+    为什么必须预检：MuJoCo 开窗失败是 C 层直接 `ERROR: could not create window` 并 exit(1)，
+    Python 的 try/except 兜不住（实测：只有一行 GLFWError 警告 + 进程直接死）。
+    所以先探一次，失败就自动降级到浏览器视图，不让整个演示崩掉。
+    """
+    import subprocess                                                # noqa: PLC0415
+
+    code = (
+        "import glfw\n"
+        "if not glfw.init(): raise SystemExit('glfw.init failed')\n"
+        "glfw.window_hint(glfw.VISIBLE, glfw.FALSE)\n"
+        "w = glfw.create_window(64, 64, 'probe', None, None)\n"
+        "print('ok' if w else 'no-window')\n"
+        "glfw.terminate()\n")
+    env = dict(os.environ, MUJOCO_GL="glfw")
+    try:
+        r = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                           text=True, timeout=25, env=env)
+    except Exception as e:                                           # noqa: BLE001
+        return False, f"预检异常: {e}"
+    out = (r.stdout or "").strip().splitlines()
+    tail = ((r.stderr or "").strip().splitlines() or [""])[-1][:140]
+    return (r.returncode == 0 and out and out[-1] == "ok"), (tail or "no output")
+
+
+def open_viewer(env):
+    """MuJoCo 原生窗口。★ 需要 MUJOCO_GL=glfw（egl 后端开不了窗口）。"""
+    import mujoco                                                     # noqa: PLC0415
+    import mujoco.viewer                                              # noqa: PLC0415  ← 必须显式导入
+
+    try:
+        v = mujoco.viewer.launch_passive(env.m, env.d)
+    except Exception as e:                                            # noqa: BLE001
+        msg = str(e).splitlines()[0][:160] if str(e) else type(e).__name__
+        raise SystemExit(
+            "打不开 MuJoCo 原生窗口。两个可能：\n"
+            f"  ① 你现在用了 MUJOCO_GL=egl（egl 只能离屏，不能开窗）→ 去掉它，或改成 MUJOCO_GL=glfw\n"
+            f"  ② 没有 DISPLAY / 没装 GTK-GL → 用 --live browser 看同样的双视角\n"
+            f"  原始错误：{msg}"
+        )
+    print("（MuJoCo 窗口已开：可以直接用鼠标拖动视角；关窗或 Ctrl-C 结束）")
+    return v
+
+
+def run_round(env, a, order, ix: int, said: str, viewer, live_win, live_web,
+              rnd: int, world_seed: int) -> tuple[bool, str, str]:
+    """跑一条 episode：设置指令 → reset 场景 → 逐步推进 → 出视频。返回 (是否跟随, 落点, 视频路径)。"""
+    import cv2                                                        # noqa: PLC0415
 
     onehot = np.zeros(len(order), np.float32)
     onehot[ix] = 1.0
     target = order[ix]
-    print(f"指令 → #{ix} {target!r}（one-hot {onehot.tolist()}，来自 {said}）")
+    env.instr_onehot = onehot                    # ★ 每轮换指令就改这里，不用重建模型
+    print(f"\n指令 → #{ix} {target!r}（one-hot {onehot.tolist()}，来自 {said}）")
 
-    from env_residual import ResidualSO101                          # noqa: PLC0415
+    out = Path(a.out)
+    if a.loop and rnd > 0:
+        out = out.with_name(f"{out.stem}_r{rnd + 1:02d}{out.suffix}")
 
-    env = ResidualSO101(base_name=a.ckpt, episode_pool=(a.episode,),
-                        max_seconds=a.max_seconds, judge="target",
-                        instr_onehot=onehot, device="cpu", seed=a.seed)
-    n_frames_target = int(round(a.max_seconds * env.control_hz))
+    n_steps = int(round(a.max_seconds * env.control_hz))
     every = max(1, int(round(env.control_hz / a.fps)))
     W, H = 640, 480
     size = (W * 2, H) if a.views == "side" else (W, H)
-    sink = MP4Sink(Path(a.out), a.fps, size)
+    sink = MP4Sink(out, a.fps, size)
 
     t0 = time.time()
-    live_mode, live_win, live_web = (a.live or None), None, None
-    if live_mode:
-        import cv2                                                  # noqa: PLC0415
-
-        if live_mode in ("auto", "window"):
-            try:
-                cv2.namedWindow("lang-conditioned ACT", cv2.WINDOW_NORMAL)
-                live_win = "lang-conditioned ACT"
-                print("（cv2 窗口已开：按 q 或 ESC 可提前结束，视频照样会存）")
-            except cv2.error as e:
-                if live_mode == "window":
-                    raise SystemExit(
-                        "这个 opencv 没有 GUI 支持（多半是 opencv-python-headless）。\n"
-                        "  改用 --live browser（零依赖浏览器视图），或换 opencv-python。\n"
-                        f"  原始错误：{str(e).splitlines()[0][:120]}")
-                print("   cv2 无 GUI 后端 → 自动切浏览器实时视图")
-        if live_win is None:
-            live_web = LiveView(a.live_port)
-            live_web.open_browser()
-    live = live_win is not None or live_web is not None
+    landed = None
     try:
-        obs, info = env.reset(seed=a.seed)
-        step = 0
-        landed = None
-        for k in range(n_frames_target):
+        env.reset(seed=world_seed)               # ★ 每轮重置场景（同 seed = 同一场景，只看指令差异）
+        for k in range(n_steps):
             _, _, term, trunc, info = env.step(np.zeros(6, np.float64))   # 残差=0 → 纯基座策略
-            step = k + 1
+            if viewer is not None:
+                if not viewer.is_running():
+                    print("   窗口被关闭 → 结束")
+                    break
+                viewer.sync()
             if k % every == 0 or term or trunc:
                 raw = env.rig.grab(env.d)
                 env_img, wrist_img = raw["env_camera"], raw["wrist_camera"]
-                if a.views == "side":
-                    frame = np.concatenate([env_img, wrist_img], axis=1)
-                else:
-                    frame = env_img if a.views == "env" else wrist_img
-                tag = f"instr=#{ix} {target[:28]}  step {step}"
-                shown = banner(frame, tag, (120, 255, 120))
+                frame = (np.concatenate([env_img, wrist_img], axis=1)
+                         if a.views == "side" else (env_img if a.views == "env" else wrist_img))
+                shown = banner(frame, f"#{ix} {target[:26]}  step {k + 1}", (120, 255, 120))
                 sink.write(shown)
                 if live_win:
                     cv2.imshow(live_win, shown[:, :, ::-1])
@@ -519,44 +532,148 @@ def main() -> int:
                 elif live_web:
                     live_web.push(shown)
                 if a.realtime:
-                    target_t = (k + 1) / env.control_hz
-                    slack = target_t - (time.time() - t0)
+                    slack = (k + 1) / env.control_hz - (time.time() - t0)
                     if slack > 0:
                         time.sleep(slack)
             if term or trunc:
                 break
         landed = info.get("landed_box") if isinstance(info, dict) else None
         if landed is None:
-            from eval_lang import classify_box                          # noqa: PLC0415
+            from eval_lang import classify_box                        # noqa: PLC0415
 
             pos = np.asarray(env.d.qpos[env.arm.oadr:env.arm.oadr + 3], float)
             landed = classify_box(pos)
     finally:
-        env.close()
         sink.close()
+
+    expect = EXPECT_BOX.get(ix)
+    ok = landed == expect
+    print(f"结果: #{ix} {target!r} → 期望 {BOX_LABEL.get(expect, expect)}，"
+          f"实际 {BOX_LABEL.get(landed, landed)} → {'✅ 跟随指令' if ok else '❌ 未跟随/未落箱'}"
+          f"（{sink.n} 帧 / {time.time() - t0:.1f}s → {out}）")
+    return ok, landed, str(out)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--ckpt", required=True, help="ckpt 目录（checkpoints/005000/pretrained_model）")
+    ap.add_argument("--ds", default=str(ROOT / "rl" / "lang_ds" / "v2_pair"))
+    ap.add_argument("--instr", choices=("left", "right"), default=None)
+    ap.add_argument("--text", default=None, help="自由文本指令（关键词判定左右）")
+    ap.add_argument("--alternate", action="store_true", help="每轮左右交替给指令（不用麦克风也能测）")
+    ap.add_argument("--mic", action="store_true", help="用麦克风说话给指令")
+    ap.add_argument("--mic-seconds", type=float, default=3.0)
+    ap.add_argument("--calibrate", action="store_true", help="录 6 次做声纹标定（不需要 ASR）")
+    ap.add_argument("--save-wav", action="store_true")
+    ap.add_argument("--live", nargs="?", const="auto", default=None,
+                    choices=("auto", "window", "browser"))
+    ap.add_argument("--live-port", type=int, default=8765)
+    ap.add_argument("--viewer", action="store_true",
+                    help="用 MuJoCo 原生窗口看（需要 MUJOCO_GL=glfw，别设 egl）")
+    ap.add_argument("--loop", action="store_true",
+                    help="演示完重置场景、继续下一条；Ctrl-C 退出")
+    ap.add_argument("--rounds", type=int, default=0, help="配合 --loop 最多跑几轮（0=无限）")
+    ap.add_argument("--rotate-scene", action="store_true",
+                    help="每轮换一个场景 seed（默认每轮同场景，只换指令）")
+    ap.add_argument("--no-play", dest="play", action="store_false")
+    ap.add_argument("--realtime", action="store_true", help="按真实时间步进（默认全速）")
+    ap.add_argument("--episode", type=int, default=2400)
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--max-seconds", type=float, default=15.0)
+    ap.add_argument("--out", default=str(ROOT / "rl" / "eval" / "demo_lang.mp4"))
+    ap.add_argument("--fps", type=float, default=15.0)
+    ap.add_argument("--views", choices=("side", "env", "wrist"), default="side")
+    a = ap.parse_args()
+
+    order = task_order_from_ds(Path(a.ds) if a.ds else None)
+    if a.calibrate:
+        calibrate(order, a.mic_seconds)
+        return 0
+    if not (a.instr or a.text or a.mic or a.alternate):
+        raise SystemExit("四选一：--instr left|right / --text \"...\" / --mic / --alternate")
+
+    if a.viewer:
+        ok_gl, why = glfw_probe()
+        if not ok_gl:
+            print(f"⚠ MuJoCo 原生窗口不可用（{why}）→ 自动改用浏览器实时视图")
+            print("  想再试原生窗口：去掉 MUJOCO_GL=egl（或显式 MUJOCO_GL=glfw）并在有桌面的终端里跑")
+            a.viewer = False
+            if not a.live:
+                a.live = "browser"
+        else:
+            print("（GLFW 预检通过，准备开 MuJoCo 窗口）")
+
+    env = make_env(a, order)
+    viewer = open_viewer(env) if a.viewer else None
+
+    # 实时视图（cv2 窗口 → 浏览器 MJPEG 自动降级）
+    live_win = live_web = None
+    if a.live:
+        import cv2                                                    # noqa: PLC0415
+
+        if a.live in ("auto", "window"):
+            try:
+                cv2.namedWindow("lang-conditioned ACT", cv2.WINDOW_NORMAL)
+                live_win = "lang-conditioned ACT"
+                print("（cv2 窗口已开：按 q/ESC 提前结束）")
+            except cv2.error as e:
+                if a.live == "window":
+                    raise SystemExit(
+                        "这个 opencv 没有 GUI 支持（多半是 headless 版）。改用 --live browser。\n"
+                        f"  原始错误：{str(e).splitlines()[0][:120]}")
+                print("   cv2 无 GUI 后端 → 自动切浏览器实时视图")
+        if live_win is None:
+            live_web = LiveView(a.live_port)
+            live_web.open_browser()
+
+    results = []
+    rnd = 0
+    try:
+        while True:
+            ix, said = get_instruction(a, order, rnd)
+            world_seed = a.seed + rnd if a.rotate_scene else a.seed
+            ok, landed, path = run_round(env, a, order, ix, said, viewer,
+                                         live_win, live_web, rnd, world_seed)
+            results.append((rnd + 1, ix, said, landed, ok, path))
+            rnd += 1
+            if not a.loop or (a.rounds and rnd >= a.rounds):
+                break
+            print("\n—— 场景已重置，请说下一条（Ctrl-C 退出）——")
+    except KeyboardInterrupt:
+        print("\n已中断")
+    finally:
+        if viewer is not None:
+            viewer.close()
         if live_win:
-            import cv2                                              # noqa: PLC0415
+            import cv2                                                # noqa: PLC0415
 
             cv2.destroyAllWindows()
         if live_web:
             live_web.close()
+        try:
+            env.close()
+        except Exception:                                             # noqa: BLE001
+            pass
 
-    expect = EXPECT_BOX.get(ix)
-    ok = landed == expect
-    print(f"\n结果: 指令 #{ix}={target!r} → 期望 {BOX_LABEL.get(expect, expect)}，"
-          f"实际落在 {BOX_LABEL.get(landed, landed)}"
-          f" → {'✅ 跟随指令' if ok else '❌ 未跟随/未落箱'}")
-    print(f"帧数 {sink.n}，用时 {time.time()-t0:.1f}s，视频 {a.out}")
-    if a.play and not live:
-        import subprocess                                           # noqa: PLC0415
+    if len(results) > 1:
+        print("\n=== 汇总 ===")
+        for n, ix, said, landed, ok, path in results:
+            print(f"  第 {n} 轮  指令#{ix}（{said}）→ {BOX_LABEL.get(landed, landed)}  "
+                  f"{'✅' if ok else '❌'}  {Path(path).name}")
+        n_ok = sum(1 for r in results if r[4])
+        print(f"  跟随 {n_ok}/{len(results)}")
+
+    last_ok = results[-1][4] if results else False
+    if a.play and not a.loop and live_win is None and live_web is None and viewer is None:
+        import subprocess                                             # noqa: PLC0415
 
         try:
-            subprocess.Popen(["xdg-open", str(a.out)], stdout=subprocess.DEVNULL,
+            subprocess.Popen(["xdg-open", results[-1][5]], stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL)
-            print("（已调用 xdg-open 播放；没反应就手动打开上面的路径）")
-        except Exception as e:                                      # noqa: BLE001
-            print(f"（自动播放失败：{e}，手动打开 {a.out}）")
-    return 0 if ok else 1
+            print("（已调用 xdg-open 播放）")
+        except Exception as e:                                        # noqa: BLE001
+            print(f"（自动播放失败：{e}）")
+    return 0 if last_ok else 1
 
 
 if __name__ == "__main__":
