@@ -9,6 +9,8 @@ PY    := /usr/bin/python3            # 纯 numpy/标准库工具用它（dsh 脚
 RL_PY := .venv-rl/bin/python         # 有 mujoco / torch / av / cv2 的环境
 LP    := /home/yyl/miniforge3/envs/lerobot312/bin/python   # lerobot 环境（有 safetensors）
 
+POLICY ?= diffusion
+STEPS  ?= 5000
 CKPT  ?= outputs/act_lang_pair/checkpoints/005000/pretrained_model
 DS    ?= rl/lang_ds/v2_pair
 EP    ?= 2400
@@ -79,6 +81,10 @@ demo-loop:
 	  --alternate --loop --rounds 3 --episode $(EP) --seed $(SEED) \
 	  --out rl/eval/demo_loop.mp4 --no-play
 
+## bc-compare  现代 BC 对照实验（POLICY=diffusion / vqbet / act，需 GPU）：同一数据同一评测
+bc-compare:
+	POLICY=$(POLICY) STEPS=$(STEPS) bash rl/run_bc_compare.sh
+
 ## eval        重跑最终反事实评测（76 rollout，CPU 约 8~15 分钟）
 eval:
 	$(RUN) CKPT=$(PWD)/$(CKPT) DS=$(PWD)/$(DS) OUT=rl/eval/lang_pair_5000.json \
@@ -100,4 +106,4 @@ clean:
 	rm -f rl/eval/demo_loop_r*.mp4
 	@echo "✓ 已清理（结果 json 与 ckpt 未动）"
 
-.PHONY: help tables check kit-demo weights assets demo demo-right demo-loop eval train audit clean
+.PHONY: help tables check kit-demo weights assets demo demo-right demo-loop bc-compare eval train audit clean
