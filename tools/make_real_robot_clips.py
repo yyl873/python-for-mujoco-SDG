@@ -169,6 +169,18 @@ def activity_crop(survey_result: Survey, aspect: float, margin: float = 0.12):
 # ---------------------------------------------------------------------------
 # pass 2: extract the window
 # ---------------------------------------------------------------------------
+def letterbox(frame: np.ndarray, aspect: float) -> np.ndarray:
+    """Centre-crop the frame to ``aspect`` without rescaling (keeps the widest extent)."""
+    height, width = frame.shape[:2]
+    if width / height > aspect:
+        target_w = int(round(height * aspect))
+        left = (width - target_w) // 2
+        return frame[:, left:left + target_w]
+    target_h = int(round(width / aspect))
+    top = (height - target_h) // 2
+    return frame[top:top + target_h, :]
+
+
 def read_window(clip: Clip, survey_result: Survey, start_probe: int, probe_count: int,
                 args) -> tuple[list[np.ndarray], int, int]:
     """Crop, rescale and decimate the chosen window. Returns frames + (requested, kept)."""
@@ -192,8 +204,11 @@ def read_window(clip: Clip, survey_result: Survey, start_probe: int, probe_count
             requested += 1
             ok, frame = capture.retrieve()
             if ok and frame is not None:
-                x0, y0, x1, y1 = crop
-                region = frame[max(0, y0):y1, max(0, x0):x1]
+                if args.no_crop:
+                    region = letterbox(frame, args.aspect)
+                else:
+                    x0, y0, x1, y1 = crop
+                    region = frame[max(0, y0):y1, max(0, x0):x1]
                 if region.size:
                     scale = args.height / region.shape[0]
                     frames.append(cv2.resize(
@@ -296,6 +311,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--window", type=float, default=9.0, help="每条取多少秒")
     parser.add_argument("--height", type=int, default=380, help="每条画面的高度（像素）")
     parser.add_argument("--aspect", type=float, default=1.34, help="裁剪后的宽高比（默认 4:3）")
+    parser.add_argument("--no-crop", action="store_true",
+                        help="不裁剪，整帧 letterbox（自动裁剪把机器人切掉时用这个）")
     parser.add_argument("--fps", type=int, default=10, help="抽取帧率")
     parser.add_argument("--probe-fps", type=float, default=4.0, help="找动作段的采样率")
     parser.add_argument("--gif-width", type=int, default=520)
@@ -315,9 +332,11 @@ def main(argv: list[str] | None = None) -> int:
         info = survey(clip.path, args.probe_fps)
         start = best_window(info.motion, probe_count)
         crop = activity_crop(info, args.aspect)
+        crop_text = "off (letterboxed)" if args.no_crop else str(crop)
         print(f"  {clip.path.name}: {info.fps:.1f} fps, {info.n_frames} frames, "
               f"{len(info.motion)} probes -> motion window at probe {start} "
-              f"({args.window:g} s), crop {crop} of {info.frame_shape[1]}x{info.frame_shape[0]}")
+              f"({args.window:g} s), crop {crop_text} "
+              f"of {info.frame_shape[1]}x{info.frame_shape[0]}")
         frames, requested, kept = read_window(clip, info, start, probe_count, args)
         if not frames:
             raise SystemExit(f"{clip.path}: 选定窗口里没有解出帧")
