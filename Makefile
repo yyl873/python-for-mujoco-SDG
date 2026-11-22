@@ -71,6 +71,10 @@ demo-right:
 	$(RUN) MUJOCO_GL=egl $(RL_PY) rl/demo_lang_policy.py --ckpt $(CKPT) \
 	  --instr right --episode $(EP) --seed $(SEED) --out rl/eval/demo_right.mp4 --no-play
 
+## compare-video  把左右两条演示拼成"同场景对比视频"（docs/assets/compare_left_right.{mp4,gif}）
+compare-video:
+	$(RUN) $(RL_PY) tools/make_compare_video.py
+
 ## assets      把演示 mp4 压成 README 能内嵌的 GIF（docs/assets/，每条约 1.5 MB）
 assets:
 	$(RUN) $(RL_PY) tools/make_assets.py
@@ -114,4 +118,4 @@ clean:
 	rm -f rl/eval/demo_loop_r*.mp4
 	@echo "✓ 已清理（结果 json 与 ckpt 未动）"
 
-.PHONY: help tables check kit-demo weights assets demo demo-right demo-loop bc-compare eval train audit kit-sync publish clean
+.PHONY: help tables check kit-demo weights compare-video assets demo demo-right demo-loop bc-compare eval train audit kit-sync publish clean

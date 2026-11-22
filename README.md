@@ -63,20 +63,26 @@
 | VLA（语言条件） | ★☆☆ | one-hot 级已打通；文本编码器未做 |
 | 部署（量化/TRT/时延预算） | ☆☆☆ | 未做 |
 
-## 它长什么样（演示）
+## 它长什么样（演示 / 视频对比）
 
-同一场景（ep2400/seed1）、同一初始状态，**只改一个 one-hot**，箱子落到不同侧。
-左边两路画面分别是策略看到的 `env` 与 `wrist` 相机：
+**同一场景（ep2400/seed1）、同一初始状态，只改一个 one-hot → 箱子落到不同侧。**
+上面一条是"放进左边"，下面一条是"放进右边"（每条画面 = 策略看到的两路相机 `env` + `wrist`）：
+
+![对比视频](docs/assets/compare_left_right.gif)
+
+▶ 完整画质对比视频：[`docs/assets/compare_left_right.mp4`](docs/assets/compare_left_right.mp4)（960×794，222 帧，1.7 MB）
+
+单独看单条：
 
 | 指令 = 左 | 指令 = 右 |
 |---|---|
 | ![left](docs/assets/demo_left_s1.gif) | ![right](docs/assets/demo_right_s1.gif) |
 
 ```bash
-make assets        # 从 mp4 重新生成上面两个 GIF（docs/assets/）
 make demo          # 左指令 → rl/eval/demo_left.mp4
 make demo-right    # 右指令 → rl/eval/demo_right.mp4
-make demo-loop     # 三轮：同场景左右交替，逐轮出片
+make assets        # mp4 → 单条 GIF（docs/assets/）
+.venv-rl/bin/python tools/make_compare_video.py   # → 上下并置对比视频 + GIF
 ```
 
 想用**说话**驱动（麦克风 → ASR → 指令 → 实时窗口/视频）：
@@ -156,7 +162,7 @@ rl/               训练 / 评测 / 演示 / 探针（run_lang_train.sh、eval_l
 real_robot/       真机侧 ROS2 bringup 包（URDF + MoveIt2 + ros2_control + sdg_generator 节点）——唯一碰 ROS 的地方
 embodied-eval-kit/ 可独立发布的评测工具包（零依赖：Wilson / Fisher / McNemar / 洁净判据 / 反事实聚合）
 tools/            执行器与探针（流水线、接触审计、结果表生成、策略回放）
-docs/             方法论与逐轮报告（RESULTS.md 自动生成）
+docs/             只留 6 份（见 docs/README.md：结果表 / 本轮报告 / RL 负结果 / 真机 A/B / 操作手册 / 物理事实）
 logs/             运行日志与断点档案
 ```
 
