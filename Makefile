@@ -16,6 +16,12 @@ DS    ?= rl/lang_ds/v2_pair
 EP    ?= 2400
 SEED  ?= 1
 
+# 真机录像（仓库外，手机拍摄）：对比录像 / 微调后
+REAL_CMP   ?= /home/yyl/视频/TG-2026-10-30-083302462.mp4
+REAL_FT    ?= /home/yyl/视频/VID_20261020_172936.mp4
+CMP_LABEL  ?= A  comparison recording
+FT_LABEL   ?= B  after real-data fine-tune
+
 .DEFAULT_GOAL := help
 
 ## help        显示所有目标
@@ -91,6 +97,12 @@ demo-right:
 compare-video:
 	$(RUN) $(RL_PY) tools/make_compare_video.py
 
+## real-clips  从手机录像生成首屏真机对比 GIF（路径用 REAL_CMP/REAL_FT 覆盖）
+real-clips:
+	$(RUN) $(RL_PY) tools/make_real_robot_clips.py \
+	  --compare "$(REAL_CMP)" --finetuned "$(REAL_FT)" \
+	  --compare-label "$(CMP_LABEL)" --finetuned-label "$(FT_LABEL)"
+
 ## assets      把演示 mp4 压成 README 能内嵌的 GIF（docs/assets/，每条约 1.5 MB）
 assets:
 	$(RUN) $(RL_PY) tools/make_assets.py
@@ -134,4 +146,4 @@ clean:
 	rm -f rl/eval/demo_loop_r*.mp4
 	@echo "✓ 已清理（结果 json 与 ckpt 未动）"
 
-.PHONY: help tables test kit-test svg check kit-demo weights compare-video assets demo demo-right demo-loop bc-compare eval train audit kit-sync publish clean
+.PHONY: help tables test kit-test svg check kit-demo weights real-clips compare-video assets demo demo-right demo-loop bc-compare eval train audit kit-sync publish clean
