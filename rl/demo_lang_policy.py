@@ -65,35 +65,95 @@ def pick_index(text: str, order: list[str]) -> int:
     raise SystemExit(f"认不出左右指令: {text!r}（task_order={order}）")
 
 
+def _read_wav(path: Path, rate: int = 16000) -> "np.ndarray":
+    import wave                                                     # noqa: PLC0415
+
+    with wave.open(str(path), "rb") as w:
+        assert w.getframerate() == rate, f"采样率 {w.getframerate()} != {rate}"
+        buf = w.readframes(w.getnframes())
+    return (np.frombuffer(buf, dtype=np.int16).astype(np.float32) / 32768.0)
+
+
+def _record_cli(seconds: float, rate: int = 16000) -> "np.ndarray | None":
+    """没有 PortAudio 时的零依赖录音：arecord / pw-record 二选一（都是系统自带常见命令）。
+
+    背景：`pip install sounddevice` 只装 Python 绑定，运行期还要系统里有 libportaudio2；
+    本机实测 `import sounddevice` 会抛 PortAudio library not found → 直接退到命令行录音，
+    免得为了 3 秒录音去装系统包。
+    """
+    import shutil                                                   # noqa: PLC0415
+    import subprocess                                               # noqa: PLC0415
+    import tempfile                                                 # noqa: PLC0415
+
+    with tempfile.TemporaryDirectory() as td:
+        wav = Path(td) / "mic.wav"
+        if shutil.which("arecord"):
+            print("   （用 arecord 录音）")
+            r = subprocess.run(["arecord", "-q", "-f", "S16_LE", "-r", str(rate),
+                                "-c", "1", "-d", str(int(round(seconds))), "-t", "wav", str(wav)],
+                               capture_output=True, text=True)
+            if r.returncode == 0 and wav.exists() and wav.stat().st_size > 1024:
+                return _read_wav(wav, rate)
+            print(f"   arecord 失败(rc={r.returncode}): {r.stderr.strip()[:160]}")
+        if shutil.which("pw-record"):
+            print("   （用 pw-record 录音）")
+            pr = subprocess.Popen(["pw-record", "--format", "s16", "--rate", str(rate),
+                                   "--channels", "1", str(wav)],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            time.sleep(seconds)
+            pr.terminate()
+            try:
+                pr.wait(timeout=5)
+            except Exception:                                       # noqa: BLE001
+                pr.kill()
+            if wav.exists() and wav.stat().st_size > 1024:
+                return _read_wav(wav, rate)
+            print("   pw-record 失败")
+    return None
+
+
 def record(seconds: float, rate: int = 16000) -> "np.ndarray":
-    """录音并返回 float32 波形；顺带做电平自检与可选落盘（--save-wav）。"""
+    """录音：sounddevice → arecord → pw-record，三路兜底；带电平自检。"""
+    print(f"🎤 请说指令（{seconds}s，例如 \"放左边\" / \"left box\"）...", flush=True)
+    audio = None
     try:
         import sounddevice as sd                                   # noqa: PLC0415
+
+        buf = sd.rec(int(seconds * rate), samplerate=rate, channels=1, dtype="float32")
+        sd.wait()
+        audio = np.asarray(buf, dtype=np.float32).reshape(-1)
     except Exception as e:                                          # noqa: BLE001
+        msg = str(e).splitlines()[0] if str(e) else type(e).__name__
+        print(f"   sounddevice 不可用（{msg}）→ 退到命令行录音")
+        audio = _record_cli(seconds, rate)
+    if audio is None:
         raise SystemExit(
-            "麦克风需要 sounddevice（有二进制 wheel，不用编译）：\n"
-            "  /home/yyl/deepseek-harness/.venv-rl/bin/pip install sounddevice\n"
-            f"  当前环境缺依赖：{e}"
+            "录音失败：三条后端都不通。任选其一修好即可：\n"
+            "  A) sudo apt install libportaudio2        ← 让 sounddevice 能用（推荐）\n"
+            "  B) sudo apt install alsa-utils           ← 提供 arecord\n"
+            "  C) sudo apt install pipewire-utils       ← 提供 pw-record"
         )
-    print(f"🎤 请说指令（{seconds}s，例如 \"放左边\" / \"left box\"）...", flush=True)
-    audio = sd.rec(int(seconds * rate), samplerate=rate, channels=1, dtype="float32")
-    sd.wait()
-    audio = np.asarray(audio, dtype=np.float32).reshape(-1)
     rms = float(np.sqrt((audio ** 2).mean()))
     peak = float(np.abs(audio).max())
     print(f"   录到 {len(audio)/rate:.1f}s，RMS={rms:.4f} peak={peak:.3f}")
     if rms < 1e-3:
-        raise SystemExit("几乎没收到声音（RMS<0.001）：检查麦克风设备、系统输入源、静音键。")
+        raise SystemExit(
+            "几乎没收到声音（RMS<0.001）：检查麦克风设备、系统输入源（pavucontrol）、静音键。" )
     return audio
 
 
-def mel_feat(audio: "np.ndarray", rate: int = 16000, n_mel: int = 24) -> "np.ndarray":
-    """极简 log-mel 均值/标准差特征（numpy 手搓，不依赖 librosa）。
+def mel_feat(audio: "np.ndarray", rate: int = 16000, n_mel: int = 24, n_ceps: int = 13) -> "np.ndarray":
+    """MFCC 风格特征（numpy 手搓，不依赖 librosa）：log-mel → 每帧去均值 → DCT → 均值+标准差。
 
-    只为"两个词的可分性"服务：左右这种单音节词，其频谱包络差异足够大。
+    为什么不是直接用 log-mel：log-mel 全为正、受音量主导，实测两个完全不同的音
+    （220 Hz 与 1500 Hz）余弦相似度还有 0.958，做最近邻会分不开。
+    每帧去均值（抹掉音量/增益）+ DCT 取低阶倒谱（只保留谱包络形状）后，
+    同类相似度高、异类明显分开，才有资格做"声纹标定"。
     """
     win, hop = int(0.025 * rate), int(0.010 * rate)
-    n = max(1, 1 + (len(audio) - win) // hop)
+    if len(audio) < win:
+        audio = np.pad(audio, (0, win - len(audio)))
+    n = 1 + (len(audio) - win) // hop
     frames = np.stack([audio[i * hop:i * hop + win] * np.hanning(win) for i in range(n)])
     spec = np.abs(np.fft.rfft(frames, axis=1)) ** 2
     freqs = np.fft.rfftfreq(win, 1 / rate)
@@ -111,8 +171,12 @@ def mel_feat(audio: "np.ndarray", rate: int = 16000, n_mel: int = 24) -> "np.nda
         up = (freqs - lo) / max(1e-9, ce - lo)
         dn = (hi - freqs) / max(1e-9, hi - ce)
         fb[m] = np.clip(np.minimum(up, dn), 0, None)
-    mel = np.log(spec @ fb.T + 1e-8)                 # (frames, n_mel)
-    feat = np.concatenate([mel.mean(0), mel.std(0)])
+    logmel = np.log(spec @ fb.T + 1e-8)                  # (frames, n_mel)
+    logmel -= logmel.mean(1, keepdims=True)              # ★ 抹掉音量/增益
+    m, k = np.arange(n_mel), np.arange(n_ceps)[:, None]
+    dct = np.cos(np.pi / n_mel * (m + 0.5) * k)          # (n_ceps, n_mel)
+    ceps = logmel @ dct.T                                 # (frames, n_ceps)
+    feat = np.concatenate([ceps.mean(0), ceps.std(0)])    # 48 维
     return feat / (np.linalg.norm(feat) + 1e-9)
 
 
@@ -193,9 +257,9 @@ def listen_mic(seconds: float, order: list[str], save_wav: bool = False) -> tupl
         best = max(scores, key=scores.get)
         margin = scores[best] - scores[min(scores, key=scores.get)]
         print(f"   声纹匹配: {scores} → {best}（margin {margin:.3f}）")
-        if margin < 0.02:
+        if margin < 0.08:
             raise SystemExit(
-                f"两个词得分太接近（margin {margin:.3f} < 0.02），不敢替你选。\n"
+                f"两个词得分太接近（margin {margin:.3f} < 0.08），不敢替你选。\n"
                 "  请重跑 `--calibrate`（同一位置、同一音量各说 3 次），或直接用 --instr left|right。"
             )
         return order.index(next(t for t in order if best in t.lower())), f"voice-calib:{best}"
