@@ -33,7 +33,7 @@
 #   DEVICE=cuda ...                      # 显式指定显卡：看不见显卡就报错，不静默降级到 CPU
 set -u
 cd "$(dirname "$0")/.." || exit 1
-export HF_HOME=$PWD/.cache/huggingface OMP_NUM_THREADS=8
+export HF_HOME=$PWD/.cache/huggingface OMP_NUM_THREADS="${OMP:-8}"
 PY="/home/yyl/miniforge3/envs/lerobot312/bin/lerobot-train"
 
 STEPS="${STEPS:-5000}"
@@ -89,6 +89,22 @@ for p in glob.glob('$OUT/checkpoints/*/training_state/training_step.json'):
 print(best)" 2>/dev/null || echo 0
 }
 
+# ★ 断电/被 kill 后 `checkpoints/last` 可能指向**半写**目录，所以续跑不用 last，
+#   而是挑"编号最大、且 model.safetensors 体积正常（>=100 MB，52M 参数约 207 MB）"的那一个。
+latest_ckpt() {
+  local best="" bestn=-1 p n sz
+  for p in "$OUT"/checkpoints/[0-9]*; do
+    [ -d "$p" ] || continue
+    [ -s "$p/pretrained_model/train_config.json" ] || continue
+    [ -s "$p/pretrained_model/model.safetensors" ] || continue
+    sz=$(stat -c%s "$p/pretrained_model/model.safetensors" 2>/dev/null || echo 0)
+    [ "$sz" -ge 100000000 ] || continue
+    n=$(basename "$p"); n=$((10#${n}))
+    if [ "$n" -gt "$bestn" ]; then best="$p"; bestn="$n"; fi
+  done
+  [ "$bestn" -ge 0 ] && echo "$best"
+}
+
 echo "=== 语言条件 ACT 微调 ==="
 echo "  数据集: $DS_ROOT"
 echo "  基座  : $BASE"
@@ -119,9 +135,9 @@ for attempt in $(seq 1 "$ATTEMPTS"); do
   esac
 
   RESUME=()
-  if [ -e "$OUT/checkpoints/last/pretrained_model/train_config.json" ]; then
-    RESUME=(--resume=true
-            --config_path="$OUT/checkpoints/last/pretrained_model/train_config.json")
+  CK=$(latest_ckpt)
+  if [ -n "$CK" ]; then
+    RESUME=(--resume=true --config_path="$CK/pretrained_model/train_config.json")
   fi
   echo "=== attempt $attempt/$ATTEMPTS 档$stage(workers=$W backend=${BK:-默认} cuda_block=$CLB)" \
        "已训=$(step_now)步 $(date +%H:%M:%S) resume=${RESUME[*]:-no} ==="
