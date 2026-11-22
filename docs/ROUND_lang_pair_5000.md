@@ -99,6 +99,7 @@
 | 最终评测结果 | `rl/eval/lang_pair_5000.json`（19 KB）、`.pair_eval_final.log` |
 | 中途评测（3000 步） | `rl/eval/lang_pair_3000_interim.json` |
 | 语言通道权重曲线工具 | `rl/probe_lang_weight.py` |
+| 可视化演示（一句话/麦克风 → 仿真挑箱子 → mp4/实时窗口） | `rl/demo_lang_policy.py`（提交 `44a56ef` 起）|
 
 ```bash
 # 训练（CPU 约 7.7 h；GPU 约 30 min）

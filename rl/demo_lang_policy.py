@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -64,51 +65,143 @@ def pick_index(text: str, order: list[str]) -> int:
     raise SystemExit(f"认不出左右指令: {text!r}（task_order={order}）")
 
 
-def listen_mic(seconds: float, order: list[str]) -> tuple[int, str]:
-    """录音 → 转指令。优先 vosk 离线识别；没有就退化到能量/过零率兜底。"""
+def record(seconds: float, rate: int = 16000) -> "np.ndarray":
+    """录音并返回 float32 波形；顺带做电平自检与可选落盘（--save-wav）。"""
     try:
         import sounddevice as sd                                   # noqa: PLC0415
     except Exception as e:                                          # noqa: BLE001
         raise SystemExit(
-            "麦克风需要 sounddevice：先 `pip install sounddevice`（可选 `pip install vosk` 用离线识别）。\n"
+            "麦克风需要 sounddevice（有二进制 wheel，不用编译）：\n"
+            "  /home/yyl/deepseek-harness/.venv-rl/bin/pip install sounddevice\n"
             f"  当前环境缺依赖：{e}"
         )
-    rate = 16000
-    print(f"🎤 请说指令（{seconds}s，例如 \"put it in the left box\" 或 \"放左边\"）...")
+    print(f"🎤 请说指令（{seconds}s，例如 \"放左边\" / \"left box\"）...", flush=True)
     audio = sd.rec(int(seconds * rate), samplerate=rate, channels=1, dtype="float32")
     sd.wait()
     audio = np.asarray(audio, dtype=np.float32).reshape(-1)
     rms = float(np.sqrt((audio ** 2).mean()))
-    print(f"   录到 {len(audio)/rate:.1f}s，RMS={rms:.4f}")
+    peak = float(np.abs(audio).max())
+    print(f"   录到 {len(audio)/rate:.1f}s，RMS={rms:.4f} peak={peak:.3f}")
     if rms < 1e-3:
-        raise SystemExit("几乎没收到声音（RMS<0.001）：检查麦克风设备/静音键。")
+        raise SystemExit("几乎没收到声音（RMS<0.001）：检查麦克风设备、系统输入源、静音键。")
+    return audio
 
-    try:                                                            # ① vosk 离线识别
+
+def mel_feat(audio: "np.ndarray", rate: int = 16000, n_mel: int = 24) -> "np.ndarray":
+    """极简 log-mel 均值/标准差特征（numpy 手搓，不依赖 librosa）。
+
+    只为"两个词的可分性"服务：左右这种单音节词，其频谱包络差异足够大。
+    """
+    win, hop = int(0.025 * rate), int(0.010 * rate)
+    n = max(1, 1 + (len(audio) - win) // hop)
+    frames = np.stack([audio[i * hop:i * hop + win] * np.hanning(win) for i in range(n)])
+    spec = np.abs(np.fft.rfft(frames, axis=1)) ** 2
+    freqs = np.fft.rfftfreq(win, 1 / rate)
+
+    def hz2mel(f):
+        return 2595.0 * np.log10(1.0 + f / 700.0)
+
+    def mel2hz(m):
+        return 700.0 * (10.0 ** (m / 2595.0) - 1.0)
+
+    edges = mel2hz(np.linspace(hz2mel(80), hz2mel(rate / 2), n_mel + 2))
+    fb = np.zeros((n_mel, len(freqs)))
+    for m in range(n_mel):
+        lo, ce, hi = edges[m], edges[m + 1], edges[m + 2]
+        up = (freqs - lo) / max(1e-9, ce - lo)
+        dn = (hi - freqs) / max(1e-9, hi - ce)
+        fb[m] = np.clip(np.minimum(up, dn), 0, None)
+    mel = np.log(spec @ fb.T + 1e-8)                 # (frames, n_mel)
+    feat = np.concatenate([mel.mean(0), mel.std(0)])
+    return feat / (np.linalg.norm(feat) + 1e-9)
+
+
+CALIB = ROOT / "rl" / "voice_calib.json"
+
+
+def calibrate(order: list[str], seconds: float, reps: int = 3) -> dict:
+    """录几次标定样本，存成每类一个质心（只要 sounddevice，不需要任何 ASR）。"""
+    cents: dict[str, list[list[float]]] = {}
+    for word in ("left", "right"):
+        cents[word] = []
+        for r in range(reps):
+            print(f"\n标定 {word}  第 {r+1}/{reps} 次")
+            cents[word].append(mel_feat(record(seconds)).tolist())
+    data = {"order": order, "feat": "log-mel mean+std (24 mel)", "centroids": {
+        w: np.mean(np.array(v), 0).tolist() for w, v in cents.items()}}
+    CALIB.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"\n已写入 {CALIB}（同一个麦克风/同一个距离才有效）")
+    return data
+
+
+def listen_mic(seconds: float, order: list[str], save_wav: bool = False) -> tuple[int, str]:
+    """录音 → 指令。后端顺序：faster-whisper → vosk → 已标定的声纹最近邻 → 报错。"""
+    audio = record(seconds)
+    if save_wav:
+        out = ROOT / "rl" / "eval" / "last_mic.wav"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        import wave                                                # noqa: PLC0415
+
+        with wave.open(str(out), "wb") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
+            w.writeframes((audio * 32767).astype(np.int16).tobytes())
+        print(f"   波形已存 {out}（识别不准时把它发我）")
+
+    # ① faster-whisper：中英都认，离线，装一次就能用
+    try:
+        from faster_whisper import WhisperModel                     # noqa: PLC0415
+
+        size = os.environ.get("WHISPER_MODEL", "small")
+        print(f"   用 faster-whisper({size}) 识别中...", flush=True)
+        model = WhisperModel(size, device="cpu", compute_type="int8")
+        segs, _ = model.transcribe(audio, language=None, beam_size=1)
+        text = "".join(s.text for s in segs).strip()
+        print(f"   识别: {text!r}")
+        if "left" in text or "right" in text or "左" in text or "右" in text:
+            return pick_index(text, order), text
+        print("   文本里没有左右关键词，继续下一个后端")
+    except ImportError:
+        print("   （没装 faster-whisper；pip install faster-whisper 可换来真正的语音识别）")
+    except Exception as e:                                          # noqa: BLE001
+        print(f"   faster-whisper 出错: {e}")
+
+    # ② vosk（模型目录用 --vosk-model 指定）
+    try:
         import vosk                                                 # noqa: PLC0415
 
-        model_dir = ROOT / "rl" / "vosk-model-small-en-us"
-        if not model_dir.exists():
-            print("   ⚠ 没找到 rl/vosk-model-small-en-us，跳过 vosk，用兜底判定")
-        else:
-            rec = vosk.KaldiRecognizer(vosk.Model(str(model_dir)), rate)
+        md = Path(os.environ.get("VOSK_MODEL", str(ROOT / "rl" / "vosk-model-small-en-us")))
+        if md.exists():
+            rec = vosk.KaldiRecognizer(vosk.Model(str(md)), 16000)
             rec.AcceptWaveform((audio * 32767).astype(np.int16).tobytes())
             text = json.loads(rec.FinalResult()).get("text", "")
             print(f"   vosk 识别: {text!r}")
             if "left" in text or "right" in text:
                 return pick_index(text, order), text
-            print("   识别文本里没有 left/right，转兜底")
+        else:
+            print(f"   （vosk 模型目录不存在：{md}；VOSK_MODEL=<dir> 可指定）")
     except ImportError:
-        print("   （没装 vosk，用兜底判定）")
+        print("   （没装 vosk）")
 
-    # ② 兜底：说话里的左右通常落在不同的共振峰/能量包络，这里只用最粗的两个判别特征，
-    #    准确率不高，但绝不会静默瞎猜 —— 会打印得分让你确认。
-    spec = np.abs(np.fft.rfft(audio * np.hanning(len(audio))))
-    freqs = np.fft.rfftfreq(len(audio), 1 / rate)
-    centroid = float((spec * freqs).sum() / (spec.sum() + 1e-9))
-    print(f"   兜底特征：谱质心 {centroid:.0f} Hz（左/右各录一次做标定更靠谱）")
+    # ③ 声纹标定最近邻：只要 sounddevice + 一次 --calibrate
+    if CALIB.exists():
+        data = json.loads(CALIB.read_text(encoding="utf-8"))
+        f = mel_feat(audio)
+        scores = {w: float(np.dot(f, np.asarray(c, float))) for w, c in data["centroids"].items()}
+        best = max(scores, key=scores.get)
+        margin = scores[best] - scores[min(scores, key=scores.get)]
+        print(f"   声纹匹配: {scores} → {best}（margin {margin:.3f}）")
+        if margin < 0.02:
+            raise SystemExit(
+                f"两个词得分太接近（margin {margin:.3f} < 0.02），不敢替你选。\n"
+                "  请重跑 `--calibrate`（同一位置、同一音量各说 3 次），或直接用 --instr left|right。"
+            )
+        return order.index(next(t for t in order if best in t.lower())), f"voice-calib:{best}"
+
     raise SystemExit(
-        "兜底判定不可靠，已停止。请用 --instr left|right，或装 vosk 做离线识别：\n"
-        "  pip install vosk sounddevice && 下载 small 模型解压到 rl/vosk-model-small-en-us"
+        "三条语音后端都不可用。二选一：\n"
+        "  A) pip install faster-whisper sounddevice     ← 真语音识别（中英都认）\n"
+        "  B) pip install sounddevice && --calibrate     ← 不用 ASR，录 6 次做声纹标定\n"
+        "  或直接用 --instr left|right / --text \"放左边\""
     )
 
 
@@ -161,6 +254,12 @@ def main() -> int:
     ap.add_argument("--text", default=None, help="自由文本指令（关键词判定左右）")
     ap.add_argument("--mic", action="store_true", help="用麦克风说话给指令")
     ap.add_argument("--mic-seconds", type=float, default=3.0)
+    ap.add_argument("--calibrate", action="store_true",
+                    help="录 6 次做声纹标定（不需要任何 ASR；之后 --mic 用最近邻判定）")
+    ap.add_argument("--save-wav", action="store_true", help="把这次麦克风波形存 rl/eval/last_mic.wav")
+    ap.add_argument("--live", action="store_true", help="开一个实时窗口，边说边看他动")
+    ap.add_argument("--no-play", dest="play", action="store_false", help="跑完不要自动播放视频")
+    ap.add_argument("--realtime", action="store_true", help="按真实时间步进（默认全速计算）")
     ap.add_argument("--episode", type=int, default=2400)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--max-seconds", type=float, default=15.0)
@@ -170,6 +269,9 @@ def main() -> int:
     a = ap.parse_args()
 
     order = task_order_from_ds(Path(a.ds) if a.ds else None)
+    if a.calibrate:
+        calibrate(order, a.mic_seconds)
+        return 0
     if a.instr:
         ix = order.index(next(t for t in order if a.instr in t.lower()))
         said = f"--instr {a.instr}"
@@ -177,7 +279,7 @@ def main() -> int:
         ix = pick_index(a.text, order)
         said = f'"{a.text}"'
     elif a.mic:
-        ix, said = listen_mic(a.mic_seconds, order)
+        ix, said = listen_mic(a.mic_seconds, order, a.save_wav)
         said = f'🎤 "{said}"'
     else:
         raise SystemExit("三选一：--instr left|right / --text \"...\" / --mic")
@@ -199,6 +301,12 @@ def main() -> int:
     sink = MP4Sink(Path(a.out), a.fps, size)
 
     t0 = time.time()
+    live = a.live
+    if live:
+        import cv2                                                  # noqa: PLC0415
+
+        cv2.namedWindow("lang-conditioned ACT", cv2.WINDOW_NORMAL)
+        print("（实时窗口已开：按 q 或 ESC 可提前结束，视频照样会存）")
     try:
         obs, info = env.reset(seed=a.seed)
         step = 0
@@ -214,7 +322,18 @@ def main() -> int:
                 else:
                     frame = env_img if a.views == "env" else wrist_img
                 tag = f"instr=#{ix} {target[:28]}  step {step}"
-                sink.write(banner(frame, tag, (120, 255, 120)))
+                shown = banner(frame, tag, (120, 255, 120))
+                sink.write(shown)
+                if live:
+                    cv2.imshow("lang-conditioned ACT", shown[:, :, ::-1])
+                    if cv2.waitKey(1) & 0xFF in (27, ord("q")):
+                        print("   手动结束")
+                        break
+                if a.realtime:
+                    target_t = (k + 1) / env.control_hz
+                    slack = target_t - (time.time() - t0)
+                    if slack > 0:
+                        time.sleep(slack)
             if term or trunc:
                 break
         landed = info.get("landed_box") if isinstance(info, dict) else None
@@ -226,6 +345,10 @@ def main() -> int:
     finally:
         env.close()
         sink.close()
+        if live:
+            import cv2                                              # noqa: PLC0415
+
+            cv2.destroyAllWindows()
 
     expect = EXPECT_BOX.get(ix)
     ok = landed == expect
@@ -233,6 +356,15 @@ def main() -> int:
           f"实际落在 {BOX_LABEL.get(landed, landed)}"
           f" → {'✅ 跟随指令' if ok else '❌ 未跟随/未落箱'}")
     print(f"帧数 {sink.n}，用时 {time.time()-t0:.1f}s，视频 {a.out}")
+    if a.play and not live:
+        import subprocess                                           # noqa: PLC0415
+
+        try:
+            subprocess.Popen(["xdg-open", str(a.out)], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+            print("（已调用 xdg-open 播放；没反应就手动打开上面的路径）")
+        except Exception as e:                                      # noqa: BLE001
+            print(f"（自动播放失败：{e}，手动打开 {a.out}）")
     return 0 if ok else 1
 
 
