@@ -148,10 +148,13 @@ def listen_mic(seconds: float, order: list[str], save_wav: bool = False) -> tupl
         print(f"   波形已存 {out}（识别不准时把它发我）")
 
     # ① faster-whisper：中英都认，离线，装一次就能用
+    #    ★ 首次运行会从 HuggingFace 下模型（tiny≈75MB / small≈484MB）。国内建议走镜像：
+    #      HF_ENDPOINT=https://hf-mirror.com（没设的话这里默认给上，不影响已下好的缓存）
     try:
+        os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
         from faster_whisper import WhisperModel                     # noqa: PLC0415
 
-        size = os.environ.get("WHISPER_MODEL", "small")
+        size = os.environ.get("WHISPER_MODEL", "tiny")
         print(f"   用 faster-whisper({size}) 识别中...", flush=True)
         model = WhisperModel(size, device="cpu", compute_type="int8")
         segs, _ = model.transcribe(audio, language=None, beam_size=1)
