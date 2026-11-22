@@ -11,7 +11,9 @@ real_robot/
     ├── launch/              # control.launch.py（控制）/ display.launch.py（只显示）
     ├── config/              # joint_limits / kinematics / moveit / ros2_controllers / srdf / ompl
     ├── rviz/                # 可视化配置
-    └── test/                # ROS 模板 lint 测试 + MoveIt2 客户端原型（现名 test/aaa.py）
+    ├── so_arm101_bringup/
+    │   └── sdg_generator.py # 真机数据生成节点（ROS2 ↔ MuJoCo：订阅 /joint_states、调 MoveIt2、渲染快照）
+    └── test/                # ROS 模板 lint 测试（copyright / flake8 / pep257）
 ```
 
 ## 与仿真管线的关系（重要）
@@ -42,13 +44,22 @@ ros2 launch so_arm101_bringup control.launch.py
 
 依赖：ROS2（MoveIt2 生态）+ `moveit_py` / `controller_manager_msgs` / `xacro` / `rviz2`。
 
-## 已知待办（发布前）
+## 已处理的整理（2026-11-22）
 
-- [ ] `test/aaa.py` 是一个真实的 MoveIt2 动作客户端（302 行），文件名是临时名 → 建议改成
-      `scripts/moveit_client.py` 并移出 `test/`（`test/` 在 ROS 约定里只放 lint/单测）。
-- [ ] 原工作区的 `mjcf/` 目录**没有**复制进来：它不被任何 launch/config 引用，且仿真侧的
-      MJCF 已在主仓 `model/`。需要的话一条命令补回：
-      `cp -r ~/mujoco_ws/src/so_arm101_bringup/mjcf real_robot/so_arm101_bringup/`
+- ✅ 原名 `test/aaa.py`（302 行，`SDGGenerator(Node)`：等 `/joint_states`、调 MoveIt2、
+  驱动 MuJoCo 渲染快照）已移入包内并改名为 `so_arm101_bringup/sdg_generator.py`，
+  同时在 `setup.py` 注册了 console script：`ros2 run so_arm101_bringup sdg_generator`。
+- ✅ `setup.py` 的 `data_files` 改成 `share(sub, pattern)` 帮助函数：**目录缺失不再报错**
+  （原先写死 `glob('mjcf/*.xml')`），`description` 也补成了真实内容。
+
+## 已知待办
+
+- [ ] 包内**没有** `mjcf/`：其中的 `scene.xml` 引用了 `lab_tex.png` / `mousepad_tex.png`，
+      这两个贴图在主仓 `model/` 里；ROS 的 launch/config 不引用 mjcf，仿真侧 MJCF 以 `model/` 为准。
+      要补回：`cp -r ~/mujoco_ws/src/so_arm101_bringup/mjcf real_robot/so_arm101_bringup/`
+      （补之前请先把两张贴图一起放进去，否则该 MJCF 渲不出来）。
+- ✅ `sdg_generator.py` 的场景路径已改成 **ROS 参数**：`-p scene_xml:=/abs/path/scene.xml`，
+  其次读环境变量 `SO_ARM101_SCENE`，最后退化到包内 `share/mjcf/scene.xml`；找不到会给出明确报错。
 - [ ] 真机闭环评测（20 次）还没有做——这是主仓 README「下一步」第 5 条。
 
 ## 许可

@@ -128,7 +128,7 @@ export MUJOCO_GL=egl                       # 渲染只认 egl（glfw/osmesa 都�
 model/            MJCF 与 14 个网格（改模型只动这里）
 ik/ grasp/ render/ collect/     仿真四步 + 自检
 rl/               训练 / 评测 / 演示 / 探针（run_lang_train.sh、eval_lang.py、demo_lang_policy.py…）
-real_robot/       真机侧 ROS2 bringup 包（URDF + MoveIt2 + ros2_control）——本仓库唯一碰 ROS 的地方
+real_robot/       真机侧 ROS2 bringup 包（URDF + MoveIt2 + ros2_control + sdg_generator 节点）——唯一碰 ROS 的地方
 embodied-eval-kit/ 可独立发布的评测工具包（零依赖：Wilson / Fisher / McNemar / 洁净判据 / 反事实聚合）
 tools/            执行器与探针（流水线、接触审计、结果表生成、策略回放）
 docs/             方法论与逐轮报告（RESULTS.md 自动生成）

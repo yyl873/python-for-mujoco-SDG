@@ -222,7 +222,25 @@ def main():
         rclpy.spin_once(node, timeout_sec=0.1)
 
     # 加载 MuJoCo
-    xml_path = '/home/yyl/mujoco_ws/src/so_arm101_bringup/mjcf/scene.xml'
+    # ★ 场景路径不再是硬编码：优先 ROS 参数 --ros-args -p scene_xml:=...，
+    #   其次环境变量 SO_ARM101_SCENE，最后退化到包 share 目录里的 mjcf/scene.xml。
+    #   （原实现写死了 workspace 绝对路径，换机器/发布会直接崩）
+    node.declare_parameter('scene_xml', '')
+    xml_path = node.get_parameter('scene_xml').value or os.environ.get('SO_ARM101_SCENE', '')
+    if not xml_path:
+        try:
+            from ament_index_python.packages import get_package_share_directory
+            cand = os.path.join(get_package_share_directory('so_arm101_bringup'), 'mjcf', 'scene.xml')
+        except Exception:
+            cand = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                'mjcf', 'scene.xml')
+        xml_path = cand
+    if not os.path.exists(xml_path):
+        raise SystemExit(
+            f"找不到 MuJoCo 场景: {xml_path}\n"
+            "  用参数指定：ros2 run so_arm101_bringup sdg_generator --ros-args -p scene_xml:=/abs/path/scene.xml\n"
+            "  或设环境变量 SO_ARM101_SCENE=/abs/path/scene.xml")
+    print(f"MuJoCo 场景: {xml_path}")
     m = mujoco.MjModel.from_xml_path(xml_path)
     d = mujoco.MjData(m)
     
