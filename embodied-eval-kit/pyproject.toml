@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "embodied-eval-kit"
+version = "0.1.0"
+description = "具身策略评测的最小工具包：区间估计、洁净判据、反事实配对聚合、三态回执"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "yyl" }]
+keywords = ["robotics", "evaluation", "imitation-learning", "language-conditioned", "statistics"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Scientific/Engineering",
+]
+dependencies = []          # 刻意零依赖：只用标准库
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.setuptools]
+packages = ["eeval"]

@@ -1,0 +1,116 @@
+{
+ "tool": "rl/probe_lang_weight.py",
+ "metric": "per_col = (lang_norm/sqrt2)/(other_norm/sqrt6)",
+ "baseline": {
+  "encoder": 0.0,
+  "vae_encoder": 0.0,
+  "note": "基座 act_sim156_lang8：6->8 补零，语言 2 列恰好 0"
+ },
+ "rows": [
+  {
+   "step": 250,
+   "encoder": 0.00348,
+   "vae_encoder": 0.00072
+  },
+  {
+   "step": 500,
+   "encoder": 0.00707,
+   "vae_encoder": 0.00103
+  },
+  {
+   "step": 750,
+   "encoder": 0.01046,
+   "vae_encoder": 0.00127
+  },
+  {
+   "step": 1000,
+   "encoder": 0.01423,
+   "vae_encoder": 0.00144
+  },
+  {
+   "step": 1250,
+   "encoder": 0.01791,
+   "vae_encoder": 0.00156
+  },
+  {
+   "step": 1500,
+   "encoder": 0.02227,
+   "vae_encoder": 0.0016
+  },
+  {
+   "step": 1750,
+   "encoder": 0.02583,
+   "vae_encoder": 0.00176
+  },
+  {
+   "step": 2000,
+   "encoder": 0.03044,
+   "vae_encoder": 0.00182
+  },
+  {
+   "step": 2250,
+   "encoder": 0.03498,
+   "vae_encoder": 0.00196
+  },
+  {
+   "step": 2500,
+   "encoder": 0.04007,
+   "vae_encoder": 0.00207
+  },
+  {
+   "step": 2750,
+   "encoder": 0.04592,
+   "vae_encoder": 0.00217
+  },
+  {
+   "step": 3000,
+   "encoder": 0.05289,
+   "vae_encoder": 0.00231
+  },
+  {
+   "step": 3250,
+   "encoder": 0.05871,
+   "vae_encoder": 0.00253
+  },
+  {
+   "step": 3500,
+   "encoder": 0.06153,
+   "vae_encoder": 0.00263
+  },
+  {
+   "step": 3750,
+   "encoder": 0.06308,
+   "vae_encoder": 0.00273
+  },
+  {
+   "step": 4000,
+   "encoder": 0.06426,
+   "vae_encoder": 0.00276
+  },
+  {
+   "step": 4250,
+   "encoder": 0.06533,
+   "vae_encoder": 0.00284
+  },
+  {
+   "step": 4500,
+   "encoder": 0.0661,
+   "vae_encoder": 0.0029
+  },
+  {
+   "step": 4750,
+   "encoder": 0.06712,
+   "vae_encoder": 0.00301
+  },
+  {
+   "step": 5000,
+   "encoder": 0.06747,
+   "vae_encoder": 0.003
+  }
+ ],
+ "reference_v1_1250": {
+  "encoder": 0.01323,
+  "source": "outputs/act_lang_dual_cpu/checkpoints/001250（v1 混叠数据）"
+ },
+ "note": "encoder 曲线在 3500 步后变平（饱和）。同口径下 v2_pair@1250=0.01791 vs v1@1250=0.01323 → 1.35x。"
+}
