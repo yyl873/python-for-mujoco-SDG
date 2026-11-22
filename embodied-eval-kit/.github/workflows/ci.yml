@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      # 零依赖：不需要 pip install 任何东西
+      - name: 语法检查
+        run: python -m compileall -q eeval examples tests
+      - name: 单元测试（零依赖，直接用脚本跑）
+        run: python tests/test_eeval.py
+      - name: 合成数据演示（验证口径与回执）
+        run: python examples/demo_synthetic.py
+      - name: 可安装性（pyproject 能被解析）
+        run: python -m pip install --upgrade pip && python -m pip install -e . && python -c "import eeval; print(eeval.__version__)"
