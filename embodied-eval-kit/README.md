@@ -48,6 +48,68 @@ python -m eeval report examples/data/language_pair_76rows.json \
 Exit code `0` when the pre-registered verdict passes, `1` when the report is produced
 but the verdict fails, `2` on bad input — so a shell or CI job can gate on it.
 
+## End to end: from a rollout log to a conclusion
+
+**1. The input** — one row per `(scene, seed, instruction)` and nothing else:
+
+```json
+[{"episode_id": 2400, "seed": 0, "ix": 0, "landed_box": "target_box"},
+ {"episode_id": 2400, "seed": 0, "ix": 1, "landed_box": "target_box_b"},
+ {"episode_id": 2401, "seed": 0, "ix": 0, "landed_box": null}]
+```
+
+`ix` is the index of the instruction in your ordered list (the slot the policy receives).
+`landed_box` is `null` when the object never landed anywhere — do not drop those rows, they
+are the entire difference between `follow_acc` and ITT. A protocol file says which box each
+instruction asks for and where the thresholds are:
+
+```json
+{"instructions": ["put it in the left box", "put it in the right box"],
+ "expected_box": {"put it in the left box": "box_a", "put it in the right box": "box_b"}}
+```
+
+**2. The command** (add `--json out.json --markdown out.md` to keep the artifacts)
+
+```bash
+python -m eeval report rows.json --protocol protocol.json
+```
+
+**3. What comes out** — the table is the report, the exit code is the gate:
+
+```text
+**Verdict: instruction followed** (pass)
+| estimand | value | denominator |
+| follow_acc | 100.0% | 40 rollouts that landed |
+| follow_acc (ITT) | 52.6% | 76 rollouts |
+| pairs both followed | 15 / 38 (39.5%) | complete pairs |
+| Wilson 95% of follow_acc | 91.2% - 100.0% | - |
+| p vs chance (0.50) | < 1e-6 | - |
+| side bias p (landing counts {'target_box': 25, 'target_box_b': 15}) | 0.1539 | - |
+```
+
+**4. Read it in this order** — each line licenses exactly one sentence:
+
+| line | what you may say | what it does not license |
+|---|---|---|
+| `follow_acc` + Wilson | "when it placed the object, it placed it where it was told" | "the policy succeeds at the task" |
+| `follow_acc` ITT | "the task succeeds X% of the time" | anything about language use |
+| `pairs both followed` | "the instruction changes the outcome" | how often the policy chooses to place it at all |
+| `side bias p` | "the landing side is not just drifting to one side" | that both sides are equally reliable (check the per-instruction block) |
+| `discordant` / McNemar | "one instruction arm fails systematically" | which physical stage fails — that is the judge's job |
+
+**5. When the verdict fails**, the label tells you what broke:
+
+| label | reading |
+|---|---|
+| `instruction followed` | all three checks pass; quote the numbers and the intervals |
+| `landing tracks the instruction, but no pair is fully correct` | the *pairing* is broken: the two arms did not run the same scenes, or one arm is missing |
+| `instruction ignored (…)` | landing is indistinguishable from guessing — the policy is not using the input |
+
+**6. Your own task.** If "where did the object end up" is not your success criterion, write
+the criterion with `eeval.judge` (gates → one boolean), then feed that boolean in as
+`landed_box`. The two halves stay independent on purpose: judging is physics, aggregating is
+statistics, and mixing them is how a metric starts measuring itself.
+
 ## The protocol
 
 A language-conditioned policy is evaluated by replaying **the same scenes** under **both
@@ -110,6 +172,25 @@ These are asserted in `tests/`, not pasted from memory:
 | `fisher_exact_2x2(1, 11, 8, 4)` | **p = 0.0094** | same-session control, only the training data differs |
 | `mcnemar_exact(8, 1)` | **p = 0.039** | paired release-success comparison |
 | `analyze_rows(language_pair_76rows.json)` | 15/38 pairs, ITT 52.6% | the project README's table |
+
+## Why these tests, not the usual ones
+
+Every choice below is a case where the textbook default gives a wrong or unusable answer on
+trial data, with the numbers this project actually hit. All of them are asserted in `tests/`.
+
+| choice here | the usual default | what the default does on this data | why that is not acceptable |
+|---|---|---|---|
+| **Wilson** interval | Wald (`p̂ ± 1.96·SE`) | 40/40 successes → **`[1.0, 1.0]`, width 0.000** | 40 trials cannot establish certainty; Wilson gives `[0.912, 1.0]` |
+| **exact** binomial | normal approximation | at n = 12 the approximation is outside its validity region; a 12/12 run gets p ≈ 0 by construction | exact two-sided p = 0.00049 is both defensible and quotable |
+| **Fisher** exact | χ² | the real A/B table `[[1,11],[9,3]]` has a **minimum expected count of 5.0** — exactly on the validity edge; `[[0,12],[8,4]]` breaks it outright | at n = 12 per arm, χ² is a guess dressed as a test |
+| **McNemar** exact | unpaired χ²/Fisher | the paired run gives 10 discordant pairs one way, 0 the other (`TF=10, FT=0`, p = 0.00195) | unpaired analysis of the same counts answers a different question and cannot say *which* instruction arm fails |
+| **Newcombe** difference interval | Wald difference | perfect separation (12/12 vs 0/12) → Wald **`[1.0, 1.0]`, width 0.000**; Newcombe `[0.657, 1.0]` | the effect is largest exactly when Wald is most confident and most wrong |
+| Clopper-Pearson **next to** Wilson | Wilson only | 40/40 → exact `0.9119` vs Wilson `0.9124` | publishing both shows the interval is not an artifact of one convention; CP also guarantees coverage |
+| **Benjamini-Hochberg** | "report the smallest p" | a 4-knob × 3-seed ablation is 12 tests | reporting the minimum of 12 p-values is how a null result becomes a finding |
+
+The rule of thumb: **use the exact test when the sample is the size a robot allows.** Exact
+methods cost nothing at n ≈ 10² (a few hundred microseconds) and they remove the "your
+significance test assumes n = 1000" objection before it is raised.
 
 ## Why hand-written statistics
 

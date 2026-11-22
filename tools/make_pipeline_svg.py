@@ -43,7 +43,7 @@ STAGES = [
       "data set sdg-v7"]),
     ("Inverse kinematics", "ik/test_ik.py",
      ["24 iterations, end-effector residual 0.92 mm   (gate: below 2 mm)"]),
-    ("True-contact grasp + 6-gate audit", "grasp/test_grasp.py → tools/probe_contact_audit.py",
+    ("True-contact grasp + 6 gates", "tools/probe_contact_audit.py → grasp/contact_gates.py",
      ["grip force comes from mj_step, never from writing qpos",
       "penetration 0.02 mm · lift +122.2 mm · descend-segment contact 0/400"]),
     ("Render → batch SDG → lerobot v3",
@@ -228,7 +228,7 @@ def build() -> str:
     c.text(px + 20, cy + 26, "Check it yourself — no GPU, no display, about 10 seconds",
            size=13, weight="650")
     for row, chunk in enumerate([
-        "make test        # 83 tests over this repository's own artifacts",
+        "make test        # 102 tests over this repository's own artifacts",
         "make kit-test    # 134 tests over the evaluation kit",
         "make tables      # regenerate docs/RESULTS.md from rl/eval/*.json",
     ]):

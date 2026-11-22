@@ -27,7 +27,7 @@ help:
 tables:
 	$(RUN) $(PY) tools/make_tables.py
 
-## test        仓库级 pytest：从已入库产物复算 README 的每个数字（83 个，约 2 s，无 GPU）
+## test        仓库级 pytest：从已入库产物复算 README 的每个数字（102 个，约 2 s，无 GPU）
 test:
 	$(RUN) $(PY) -m pytest tests -p no:pytest_cov
 

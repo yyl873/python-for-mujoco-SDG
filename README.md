@@ -2,6 +2,12 @@
 
 # 纯 MuJoCo 仿真 → 语言条件抓取（零 ROS）
 
+[![tests](https://github.com/yyl873/python-for-mujoco-SDG/actions/workflows/ci.yml/badge.svg)](https://github.com/yyl873/python-for-mujoco-SDG/actions/workflows/ci.yml)
+[![eval-kit CI](https://github.com/yyl873/embodied-eval-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/yyl873/embodied-eval-kit/actions/workflows/ci.yml)
+![tests](https://img.shields.io/badge/tests-102%20passed-brightgreen)
+![python](https://img.shields.io/badge/python-3.10%20%7C%203.12-blue)
+![license](https://img.shields.io/badge/license-MIT-green)
+
 逆运动学 → **真接触**抓取（不写 `qpos`）→ 批量合成数据 → lerobot v3 → 语言条件 ACT → **反事实配对评测**证明语言真的进了策略。仿真与数据链路不 `import rclpy`；真机侧的 ROS 2 隔离在 `real_robot/`。
 
 ## 三个数字
@@ -14,6 +20,40 @@
 
 语言侧同口径的三个数：[落对 **40/40 = 100%**（Wilson 下界 0.912）](docs/RESULTS.md)、**配对全对 15/38**、ITT **52.6%**；那 2 维语言通道的权重从 **0.00000** 训到 **0.06747**。
 对照：混叠数据的 v1 在同一评测里"看起来"有 **56.4%**，但它的**配对全对是 0/38**——因为数据里"指令"和"场景"共线，这个 56.4% 只是"总往右放"的副产品。把指令和场景解耦（同场景两条指令首帧 `qpos` 差 **0.000e+00**）之后，才有 15/38 这个真数字。
+
+## 真物理：六项接触闸门（"合成数据"和"摆拍"的区别）
+
+假抓取很容易做得好看：指尖压在盒顶往下揉，再整体抬起来——视频里像抓到了，实际载荷是
+"往下压"而不是"两侧夹"，松爪那一刻盒子就掉。所以判据不是"抬起来了没"，而是六个互相
+独立的量，每个阈值都卡在物理行为发生变化的位置上（`docs/PHYSICS_FACTS.md` §2）：
+
+| 闸门 | 判据 | 实测 | 它挡住什么 |
+|---|---|---|---|
+| **G1** 下探零接触 | `== 0` 步 | **0 / 400** | 指尖先落在盒顶，再"掐"着往上撑 |
+| **G2** 不压进桌面 | `<= 0.5 mm` | **0.39 mm** | 把盒子压进桌面借力 |
+| **G3** 不撞倒 | `<= 5°` | **1.06°** | 接近段就把盒子顶翻 |
+| **G4** 真抬起来 | `>= 50 mm` | **+122.22 mm** | G1–G3 靠"根本不碰盒子"刷绿 |
+| **G5** 无缝隙也无插穿 | `\|gap\| <= 1.2 mm` | **−0.85 / −1.07 mm** | 松到能滑出，或指头插进盒壁 |
+| **G6** 无深穿模 | `<= 1.6 mm` | **0.02 mm** | 指壳整块插进盒体（上一版 **7.5 mm**） |
+
+判据的唯一实现是 [`grasp/contact_gates.py`](grasp/contact_gates.py)：每条闸门带 `protects`（挡住什么）
+和 `rationale`（**为什么是这个数**，不是随口取整），`docs/PHYSICS_FACTS.md` 里的阈值由测试强制对齐——
+文档和代码不可能悄悄漂移。
+
+```python
+from grasp.contact_gates import evaluate
+
+report = evaluate({                       # 一次 rollout 的实测值，全部来自 mj_step 采样
+    "descend_contact_steps": 0, "press_mm": 0.39, "tilt_at_grasp_end_deg": 1.06,
+    "rise_mm": 122.22, "gap_fixed_mm": -0.85, "gap_jaw_mm": -1.07, "pen_depth_mm": 0.02,
+})
+report.ok            # True
+report.failed        # ()  —— 不通过时给出是哪几条，不是一句"抓取失败"
+print(report.to_markdown())
+```
+
+抓取本身也验过：IK 24 次迭代收敛、末端残差 **0.923 mm**；握持力峰值 **2.37 N**（药盒自重 0.113 N），
+法向 z 均值 **−0.002**（+1 是纯下压、0 是纯侧夹）。
 
 ## 一次排障：65° 的腕部冲突
 
@@ -34,11 +74,14 @@
 ## 30 秒验证（不需要 GPU、不需要显示器）
 
 ```bash
-make test        # 83 个测试：从 rl/eval/*.json 复算 README 里的每一个数字
+make test        # 102 个测试：从 rl/eval/*.json 复算 README 里的每一个数字
 make kit-test    # 134 个测试：评测工具包的统计与反事实协议
 make tables      # 从 rl/eval/*.json 重新生成 docs/RESULTS.md（数字不许手抄）
 make demo        # 出一条演示视频（可加 --mic 用语音下指令）
 ```
+
+测试分两处，都是标准 pytest：`tests/`（102 个，仓库级：复算数字、守文档与代码对齐、守 README 链接）
+和 `embodied-eval-kit/tests/`（134 个，评测工具包的统计与反事实协议）。两个仓库都跑 CI，badge 点进去看得到绿。
 
 `make test` 里的每个断言都指向一个已入库的产物：`40/40`、`15/38`、`p=0.0028`、`p=0.0094` 不是写死的字符串，而是从 `rl/eval/*.json` 用 [`embodied-eval-kit`](embodied-eval-kit/README.md) 重算出来的结果——数字对不上，测试就红。
 
@@ -46,7 +89,7 @@ make demo        # 出一条演示视频（可加 --mic 用语音下指令）
 
 ```
 model/               MJCF 与 14 个网格（改模型只动这里）
-ik/ grasp/ render/ collect/   仿真四步：IK 24 次迭代内收敛 → 真接触抓取 → 六项闸门 → 渲染与合成数据
+ik/ grasp/ render/ collect/   仿真四步；grasp/contact_gates.py 是六项接触闸门的唯一实现（有单测）
 rl/                  训练壳（断电续跑/降档/显卡闸门）、反事实评测、演示与语音链路
 real_robot/          真机侧 ROS 2 bringup（URDF + MoveIt2 + ros2_control + SDGGenerator 节点）——唯一碰 ROS 的地方
 embodied-eval-kit/   可独立发布的评测工具包：手写精确统计 + 反事实配对协议 + 三态回执（134 个测试，零依赖）

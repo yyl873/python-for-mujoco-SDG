@@ -23,8 +23,8 @@
 <rect x="40" y="372" width="664" height="104" rx="10" fill="#f8fafc" stroke="#cdd8e4" stroke-width="1.2"/>
 <circle cx="69.0" cy="399.0" r="13" fill="#0b5cad"/>
 <text x="69" y="403.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#ffffff" font-weight="700" text-anchor="middle">3</text>
-<text x="92" y="399" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#12181f" font-weight="650" text-anchor="start">True-contact grasp + 6-gate audit</text>
-<text x="92" y="421" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" fill="#0b5cad" font-weight="400" text-anchor="start">grasp/test_grasp.py → tools/probe_contact_audit.py</text>
+<text x="92" y="399" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#12181f" font-weight="650" text-anchor="start">True-contact grasp + 6 gates</text>
+<text x="92" y="421" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" fill="#0b5cad" font-weight="400" text-anchor="start">tools/probe_contact_audit.py → grasp/contact_gates.py</text>
 <text x="92" y="443" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">grip force comes from mj_step, never from writing qpos</text>
 <text x="92" y="460" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">penetration 0.02 mm · lift +122.2 mm · descend-segment contact 0/400</text>
 <line x1="372.0" y1="344" x2="372.0" y2="365" stroke="#8895a4" stroke-width="1.6" marker-end="url(#arrow)"/>
@@ -113,7 +113,7 @@
 <text x="912" y="613" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#8895a4" font-weight="400" text-anchor="start">40 of 76 rollouts — the denominator that keeps 100% honest</text>
 <rect x="740" y="690" width="660" height="118" rx="10" fill="#e8f0fa" stroke="#c9dcf0" stroke-width="1.2"/>
 <text x="760" y="716" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#12181f" font-weight="650" text-anchor="start">Check it yourself — no GPU, no display, about 10 seconds</text>
-<text x="760" y="740" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="11.5" fill="#0b5cad" font-weight="400" text-anchor="start">make test        # 83 tests over this repository's own artifacts</text>
+<text x="760" y="740" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="11.5" fill="#0b5cad" font-weight="400" text-anchor="start">make test        # 102 tests over this repository's own artifacts</text>
 <text x="760" y="760" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="11.5" fill="#0b5cad" font-weight="400" text-anchor="start">make kit-test    # 134 tests over the evaluation kit</text>
 <text x="760" y="780" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="11.5" fill="#0b5cad" font-weight="400" text-anchor="start">make tables      # regenerate docs/RESULTS.md from rl/eval/*.json</text>
 <text x="40" y="1008" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#8895a4" font-weight="400" text-anchor="start">github.com/yyl873/python-for-mujoco-SDG   ·   MIT   ·   simulation, data, evaluation and conclusions are mine; ACT/SmolVLA implementations come from lerobot.</text>

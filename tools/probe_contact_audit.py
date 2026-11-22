@@ -91,6 +91,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "render"))
 sys.path.insert(0, str(ROOT / "grasp"))
 
+import contact_gates  # noqa: E402  (grasp/contact_gates.py -- 六项闸门的唯一实现）
+
 
 def load_render():
     """把 render/test_render.py 当模块加载（它自己会设 MUJOCO_GL，必须在 import mujoco 前读 argv）。"""
@@ -100,31 +102,15 @@ def load_render():
     return mod
 
 
-# ---- 判据阈值 -------------------------------------------------------------
-# G1 = 0 步：语义上「一次都不许碰」，不是「少碰一点」。
-GATE_DESCEND_CONTACT_STEPS = 0
-# G2 = 0.3 mm：静置时底面本来就有 ~0.2 mm 的软化下沉（垫面 +2.00 / 底面 +1.77），
-# 再往下压 0.3 mm 之内算这块软化接触的固有误差；超过就不是「接触软化」而是「压进桌面」。
-GATE_PRESS_MM = 0.50   # 与 render 的 PRESS_MAX_MM 对齐（0.15 合爪实测 0.31）
-# G3 = 5°：真机夹 15 mm 薄边、重心偏一点都会有 1~2° 的天然歪斜，5° 是肉眼可辨的界线。
-# ★ 判的是【夹稳那一刻】（settle_a 段末）—— 也就是"有没有在抓的瞬间把盒子撞倒"。
-#   搬运途中的倾角单独报（carry_tilt_max_deg），不作判据：本臂 lift/elbow/flex 三轴平行，
-#   工具俯仰随 TCP 高度线性变化 0.22°/mm（0.012 m -> 44.1°，0.16 m -> 76.3°），
-#   抬 100 mm 必然让盒子跟着歪 ~22~30°。这是运动学固有性质，不是接触伪影。
-GATE_TILT_DEG = 5.0
-# G4 = 50 mm：与 evaluate_success 同口径。★没有它，G1~G3 可以被"根本不去碰药盒"刷绿——
-# 实测踩过：把抓取点横移 10mm 后下探零接触、压盒 0，但抬升也是 0（压根没抓到）。
-GATE_LIFT_MM = 50.0
-# G5 = 0.6 mm：夹稳时【两指真实内表面到药盒】的距离。>0 是缝，<0 是指头插进盒（穿模）。
-#   用户反馈"指尖的缝隙有点大"就是这个量；上一版实测 固定指 0.00 / 活动指 17.83 mm。
-# ★ 两向判：|gap| <= 1.2 mm。正数=缝（用户抱怨的"缝隙大"），负数=指头压进盒（挤压量）。
-#   实测指垫贴齐后夹稳时 固定指 -0.85 / 活动指 -1.07 mm —— 这是"压住"不是"插穿"。
-GATE_GAP_MM = 1.2
-# G6：手指实体顶点落在药盒体积内的【深度】（mm），不是个数。
-#   为什么改口径：夹持时指垫本来就要压进盒面 1 mm 左右（TPU 垫压缩），用"个数=0"会把
-#   正常挤压也判成穿模（实测个数 1968，但深度只有 ~1 mm）。真正要看的是"有没有整块插进去"：
-#   上一版（指壳凸包/悬浮垫时代）实测深度 **7.5 mm**，那才是用户说的穿模。
-GATE_PEN_DEPTH_MM = 1.6
+# ---- 判据阈值：真身是 grasp/contact_gates.py，这里只做别名 ----
+# 每条判据的"为什么是这个数"写在 contact_gates.Gates.rationale 里（可被测试引用），
+# 这里不再复述，避免两份文案漂移。
+GATE_DESCEND_CONTACT_STEPS = contact_gates.threshold_of("descend_contact_steps")
+GATE_PRESS_MM = contact_gates.threshold_of("press_mm")
+GATE_TILT_DEG = contact_gates.threshold_of("tilt_at_grasp_end_deg")
+GATE_LIFT_MM = contact_gates.threshold_of("rise_mm")
+GATE_GAP_MM = contact_gates.threshold_of("gap_mm")
+GATE_PEN_DEPTH_MM = contact_gates.threshold_of("pen_depth_mm")
 
 # 要在地理位置上取证的四个时刻（取各阶段【结束时】的状态）
 _GEO_PHASES = ("settle_a", "lift", "transport", "place")
@@ -360,20 +346,21 @@ def probe(TR, a, rec, *, start_pose, gz, grip, roll, scale, settle=None, want_tr
     rep["pen_depth_mm"] = max(rep["pen_depth_fixed_mm"], rep["pen_depth_jaw_mm"])
     rep["geo_by_phase"] = {k: v for k, v in geo.items()}
 
-    # --- 判据 ---
+    # --- 判据（六项全部由 grasp/contact_gates.py 判定，这里只做数据搬运）---
     # 注意 bool(...) 不能省：numpy 比较返回 np.bool_，json 序列化会直接抛
-    # TypeError（2024-11 第六轮真踩过，扫到第一组就崩）。
-    rep["gate_descend_clean"] = bool(rep["descend_contact_steps"] <= GATE_DESCEND_CONTACT_STEPS)
-    rep["gate_press"] = bool(rep["press_mm"] <= GATE_PRESS_MM)
-    rep["gate_tilt"] = bool(rep["tilt_at_grasp_end_deg"] <= GATE_TILT_DEG)
-    rep["gate_lift"] = bool(rep["rise_mm"] >= GATE_LIFT_MM)
-    g_f, g_j = rep["gap_fixed_mm"], rep["gap_jaw_mm"]
-    rep["gate_gap"] = bool(g_f is not None and g_j is not None
-                           and abs(g_f) <= GATE_GAP_MM and abs(g_j) <= GATE_GAP_MM)
-    rep["gate_pen"] = bool(rep["pen_depth_mm"] <= GATE_PEN_DEPTH_MM)
-    rep["gates_ok"] = bool(rep["gate_descend_clean"] and rep["gate_press"]
-                           and rep["gate_tilt"] and rep["gate_lift"]
-                           and rep["gate_gap"] and rep["gate_pen"])
+    # TypeError（2024-11 第六轮真踩过，扫到第一组就崩）——contact_gates 内部已经 bool 化。
+    audit = contact_gates.evaluate({
+        "descend_contact_steps": rep["descend_contact_steps"],
+        "press_mm": rep["press_mm"],
+        "tilt_at_grasp_end_deg": rep["tilt_at_grasp_end_deg"],
+        "rise_mm": rep["rise_mm"],
+        "gap_fixed_mm": rep["gap_fixed_mm"],
+        "gap_jaw_mm": rep["gap_jaw_mm"],
+        "pen_depth_mm": rep["pen_depth_mm"],
+    })
+    rep.update(audit.flag_dict())
+    rep["gates_ok"] = bool(audit.ok)
+    rep["gates"] = audit.as_dict()
     if want_trace:
         rep["trace"] = [
             [r["n"], r["phase"], round(r["tcpz"] * 1000, 2), round(r["oz"] * 1000, 2),
