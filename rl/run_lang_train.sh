@@ -30,6 +30,7 @@
 #   DS_ROOT=$PWD/rl/lang_ds/v1_h264 STEPS=5000 bash rl/run_lang_train.sh
 #   ATTEMPTS=200 ...                     # 想更硬地磨
 #   WORKERS=0 BACKEND=pyav ...           # 想直接从最低档开始
+#   DEVICE=cuda ...                      # 显式指定显卡：看不见显卡就报错，不静默降级到 CPU
 set -u
 cd "$(dirname "$0")/.." || exit 1
 export HF_HOME=$PWD/.cache/huggingface OMP_NUM_THREADS=8
@@ -47,6 +48,8 @@ DS_ROOT="${DS_ROOT:-$PWD/rl/lang_ds/v1}"
 BASE="${BASE:-/home/yyl/lerobot/outputs/train/act_sim156_lang8/pretrained_model}"
 # 解码后端：lerobot 默认 torchcodec；BACKEND=pyav 可换 pyav 解码（降档第 2 级用）
 BACKEND="${BACKEND:-}"
+# 设备：空=交给 lerobot 自选（沙箱里会**静默降级到 CPU**）；DEVICE=cuda 让它没显卡就直接报错
+DEVICE="${DEVICE:-}"
 # 数据集/策略标签（push_to_hub=false，只进元数据；换数据集时别让日志串台）
 REPO_ID="${REPO_ID:-local/v1}"
 POLICY_ID="${POLICY_ID:-local/act_lang_dual}"
@@ -54,6 +57,27 @@ POLICY_ID="${POLICY_ID:-local/act_lang_dual}"
 for p in "$DS_ROOT" "$BASE"; do
   [ -e "$p" ] || { echo "缺依赖: $p" >&2; exit 2; }
 done
+
+# ★ 显卡闸门：lerobot 对 --policy.device=cuda 只会打一行 WARNING 就切回 cpu（实测），
+#   所以这里先用 torch 自己问一句。DEVICE=cuda 而不可用 → 直接退出 3，别让人白等 8 小时。
+CUDA_OK=$(env -u PYTHONHOME -u PYTHONPATH "$(dirname "$PY")/python" -c "
+import torch,sys
+print('yes' if (torch.cuda.is_available() and torch.cuda.device_count()>0) else 'no')
+" 2>/dev/null | tail -1)
+[ -n "$CUDA_OK" ] || CUDA_OK=unknown
+case "${DEVICE:-}" in
+  ""|cpu|CPU) ;;                                        # 没指定：允许 CPU，但下面会喊一声
+  *)
+    if [ "$CUDA_OK" != "yes" ]; then
+      echo "✗ DEVICE=$DEVICE 但 torch.cuda.is_available()=${CUDA_OK}（$(dirname "$PY")/python）" >&2
+      echo "  这台 shell 看不到显卡：要么换到能看见 /dev/nvidia* 的终端，要么不设 DEVICE 接受 CPU 慢跑。" >&2
+      exit 3
+    fi ;;
+esac
+if [ "$CUDA_OK" != "yes" ]; then
+  echo "⚠️ 本 shell 里 torch.cuda.is_available()=${CUDA_OK} → 本次**只能用 CPU**（batch $BATCH 约 6 s/step，$STEPS 步约 $(( STEPS * 6 / 60 )) 分钟（≈$(( STEPS * 6 / 3600 )) 小时））。"
+  echo "   想用显卡：在能跑 nvidia-smi 的终端里执行，并加 DEVICE=cuda。"
+fi
 
 step_now() {  # 目前最新 ckpt 的步数（读不到就 0）
   env -u PYTHONHOME -u PYTHONPATH /usr/bin/python3 -c "
@@ -72,6 +96,7 @@ echo "  步数  : $STEPS（batch $BATCH, seed $SEED, save_freq $SAVE_FREQ）"
 echo "  已训  : $(step_now) 步（有 ckpt 就自动续跑）"
 echo "  输出  : $OUT"
 echo "  重试  : 最多 $ATTEMPTS 次；每档连续崩 $ESCALATE_AFTER 次自动降档"
+echo "  设备  : ${DEVICE:-lerobot 自选（无显卡会静默降到 CPU）}；可见显卡节点: $(ls /dev/nvidia* 2>/dev/null | head -3 | tr '\n' ' ' || echo 无)"
 echo
 
 stage=0            # 0=配置原样  1=num_workers=0  2=num_workers=0 + pyav
@@ -112,10 +137,14 @@ for attempt in $(seq 1 "$ATTEMPTS"); do
     --policy.pretrained_path="$BASE" \
     --policy.push_to_hub=false --save_checkpoint_to_hub=false \
     --batch_size="$BATCH" --steps="$STEPS" --save_freq="$SAVE_FREQ" \
-    --num_workers="$W" ${BK:+--dataset.video_backend="$BK"} \
+    --num_workers="$W" ${BK:+--dataset.video_backend="$BK"} ${DEVICE:+--policy.device="$DEVICE"} \
     --output_dir="$OUT" --seed="$SEED" "${RESUME[@]}" 2>&1 | tee "$ALOG"
   rc=${PIPESTATUS[0]}
   echo "=== attempt $attempt rc=$rc 已训=$(step_now)步  $(date +%H:%M:%S) ==="
+  # ★ 抓"要了显卡却跑了 CPU"：lerobot 只打 WARNING，不改变 rc
+  if [ "${DEVICE:-}" != "cpu" ] && grep -qiE "Device 'cuda' is not available|Switching to 'cpu'" "$ALOG"; then
+    echo "  ⚠️ 本次 attempt 实际跑在 CPU 上（日志里有 lerobot 的 Switching to 'cpu'）—— 别把 8 小时的数字当 GPU 结果。"
+  fi
   [ "$rc" -eq 0 ] && break
 
   fails_here=$((fails_here + 1))
