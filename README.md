@@ -38,6 +38,31 @@
 
 ---
 
+## 四块能力的证据（面试官 30 秒版）
+
+| 方向 | 我做了什么 | 代码/文档在哪 | 关键数字 | 自评 |
+|---|---|---|---|---|
+| **ROS2** | 真机侧 bringup：URDF/xacro + MoveIt2 配置 + ros2_control + RViz，加一个 `SDGGenerator` 节点（订阅 `/joint_states`→驱动 MuJoCo→渲染快照→存数据），场景路径参数化、注册 console script | `real_robot/so_arm101_bringup/`（`urdf/ config/ launch/ rviz/ so_arm101_bringup/sdg_generator.py`） | 1 个可编译 ROS2 包 · 2 个 launch · 13 个网格 · 节点 302 行 | 中（能搭能跑，未做真机闭环评测） |
+| **IL / 行为克隆** | 全部自制数据管线 + ACT 微调 + **反事实配对评测**（同场景换指令判落点） | `rl/run_lang_train.sh`、`rl/eval_lang.py`、`docs/RESULTS.md` | 留出场景 **follow_acc 100%（40/40）**、配对全对 **15/38**、ITT **52.6%**；真机抓取 **8.3%→75%（Fisher p=0.0028）** | **强**（含判据设计与负结果把控） |
+| **RL** | 冻结 ACT 基座 + **残差 SAC**（3 套奖励 × 3 seed × 30k 步），配洁净判据做 A/B | `rl/env_residual.py`、`rl/train.py`、`rl/eval_ab.py`、`docs/REPORT_RESIDUAL_RL.md` | 旧口径 +5.6pp 是假象；**洁净口径 26.7%→13.3%**，根因=奖励被钻空子（穿透罚 −3 ≫ 抓取奖 +0.5） | 中（会做、**诚实判负**；缺正结果，未做 PPO/离线 RL） |
+| **VLA / 语言条件** | 语言经 state 第 6/7 维 one-hot 进策略；用**配对数据**打掉"指令与场景共线" | `collect/collect.py --scene-seed-offset`、`rl/probe_lang_weight.py` | 语言列权重 **0.00000→0.06747**；配对后落点从 **1:38 偏斜 → 25:15** | 中偏弱（接口对，但**不是自由文本理解**；`smolvla`/`π0` 已就绪待跑） |
+
+一句话：**ROS2 我会搭、IL 我做全套并做对了判据、RL 我做完了并诚实判负、VLA 我把语言真正接进了策略但只到 one-hot 这一级。**
+
+## 技能栈（自评 + 证据）
+
+| 能力 | 档位 | 证据 |
+|---|---|---|
+| 实验设计与评测（区间估计/显著检验/预注册判据/反事实配对） | ★★★ | `embodied-eval-kit/`（独立开源，CI 全绿）、`docs/RESULTS.md` |
+| 仿真与物理（MuJoCo、真接触、域随机化、SDG） | ★★★ | 六项接触闸门、`collect/`、`docs/PHYSICS_FACTS.md` |
+| 数据工程（合成数据 → lerobot v3 → 微调） | ★★★ | 92 条/41922 帧、28 条/12670 帧配对集 |
+| 稳定性工程（续跑/降档/看护/显卡闸门） | ★★☆ | 8 小时 CPU 训练零崩溃（`rl/run_lang_train.sh`） |
+| ROS2 工程（URDF/MoveIt2/ros2_control） | ★★☆ | `real_robot/` |
+| IL（ACT 全流程 + 消融工具） | ★★☆ | 会调会评；只做过 ACT，现代 BC（DP/VQ-BeT）待对照 |
+| RL（SAC 残差） | ★☆☆ | 一个负向但完整的结果；无 PPO/离线 RL |
+| VLA（语言条件） | ★☆☆ | one-hot 级已打通；文本编码器未做 |
+| 部署（量化/TRT/时延预算） | ☆☆☆ | 未做 |
+
 ## 它长什么样（演示）
 
 同一场景（ep2400/seed1）、同一初始状态，**只改一个 one-hot**，箱子落到不同侧。
