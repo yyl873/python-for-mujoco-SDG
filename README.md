@@ -40,9 +40,15 @@
 
 ## 它长什么样（演示）
 
-同一场景、同一初始状态，**只改一个 one-hot**，箱子落到不同侧：
+同一场景（ep2400/seed1）、同一初始状态，**只改一个 one-hot**，箱子落到不同侧。
+左边两路画面分别是策略看到的 `env` 与 `wrist` 相机：
+
+| 指令 = 左 | 指令 = 右 |
+|---|---|
+| ![left](docs/assets/demo_left_s1.gif) | ![right](docs/assets/demo_right_s1.gif) |
 
 ```bash
+make assets        # 从 mp4 重新生成上面两个 GIF（docs/assets/）
 make demo          # 左指令 → rl/eval/demo_left.mp4
 make demo-right    # 右指令 → rl/eval/demo_right.mp4
 make demo-loop     # 三轮：同场景左右交替，逐轮出片
@@ -122,6 +128,8 @@ export MUJOCO_GL=egl                       # 渲染只认 egl（glfw/osmesa 都�
 model/            MJCF 与 14 个网格（改模型只动这里）
 ik/ grasp/ render/ collect/     仿真四步 + 自检
 rl/               训练 / 评测 / 演示 / 探针（run_lang_train.sh、eval_lang.py、demo_lang_policy.py…）
+real_robot/       真机侧 ROS2 bringup 包（URDF + MoveIt2 + ros2_control）——本仓库唯一碰 ROS 的地方
+embodied-eval-kit/ 可独立发布的评测工具包（零依赖：Wilson / Fisher / McNemar / 洁净判据 / 反事实聚合）
 tools/            执行器与探针（流水线、接触审计、结果表生成、策略回放）
 docs/             方法论与逐轮报告（RESULTS.md 自动生成）
 logs/             运行日志与断点档案
@@ -140,6 +148,7 @@ logs/             运行日志与断点档案
 
 **第三方**：[lerobot](https://github.com/huggingface/lerobot)（数据格式与 ACT/SmolVLA 实现）、
 SO-ARM101 本体模型。**策略实现不是我写的**，我写的是数据、评测、工程与结论。
+真机 bringup 包 `real_robot/so_arm101_bringup/` 为 Apache-2.0，保留原 LICENSE。
 
 ---
 
@@ -150,6 +159,7 @@ SO-ARM101 本体模型。**策略实现不是我写的**，我写的是数据、
 - 真机 A/B 是 **n=12 的 pilot**：抓取显著（p=0.0028），任务成功率**未达显著**。
 - 语言是 **2 维 one-hot（左/右）**，不是自由文本理解；换说法不支持。
 - 语言条件策略**只在仿真里评测过**，尚未在真机做闭环评测。
+- 红线 #1「零 ROS」只约束**仿真与数据链路**；真机侧 ROS2 代码隔离在 `real_robot/`（见其 README）。
 
 ---
 

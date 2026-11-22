@@ -48,3 +48,9 @@ venv/
 # 配对采集/导出的编号清单（运行时生成）
 /.lang_pair_ids*.txt
 /.lang_ids.txt
+
+# ROS2 工作区产物（真机侧 real_robot/ 只提交源码包）
+/build/
+/install/
+/log/
+real_robot/**/__pycache__/

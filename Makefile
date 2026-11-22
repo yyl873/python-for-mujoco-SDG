@@ -69,6 +69,10 @@ demo-right:
 	$(RUN) MUJOCO_GL=egl $(RL_PY) rl/demo_lang_policy.py --ckpt $(CKPT) \
 	  --instr right --episode $(EP) --seed $(SEED) --out rl/eval/demo_right.mp4 --no-play
 
+## assets      把演示 mp4 压成 README 能内嵌的 GIF（docs/assets/，每条约 1.5 MB）
+assets:
+	$(RUN) $(RL_PY) tools/make_assets.py
+
 ## demo-loop   三轮循环演示（同场景、左右自动交替；换成 --mic 就是说话版）
 demo-loop:
 	$(RUN) MUJOCO_GL=egl $(RL_PY) rl/demo_lang_policy.py --ckpt $(CKPT) \
@@ -96,4 +100,4 @@ clean:
 	rm -f rl/eval/demo_loop_r*.mp4
 	@echo "✓ 已清理（结果 json 与 ckpt 未动）"
 
-.PHONY: help tables check kit-demo weights demo demo-right demo-loop eval train audit clean
+.PHONY: help tables check kit-demo weights assets demo demo-right demo-loop eval train audit clean
