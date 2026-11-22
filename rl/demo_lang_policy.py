@@ -272,6 +272,109 @@ def listen_mic(seconds: float, order: list[str], save_wav: bool = False) -> tupl
     )
 
 
+# ---------------------------------------------------------------- 实时视图（不依赖 GUI 库）
+class LiveView:
+    """把帧推给浏览器看的实时窗口（MJPEG over HTTP，只用标准库 + cv2.imencode）。
+
+    为什么不用 cv2.imshow：本机装的是 opencv-python-headless，`cv2.namedWindow`
+    直接抛 "The function is not implemented"（实测）。浏览器视图零依赖：起一个本地
+    HTTP 服务 → xdg-open 打开 → 页面里 <img> 订阅 multipart/x-mixed-replace。
+    """
+
+    def __init__(self, port: int = 8765):
+        import http.server                                             # noqa: PLC0415
+        import socketserver                                            # noqa: PLC0415
+        import threading                                               # noqa: PLC0415
+
+        self._cond = threading.Condition()
+        self._jpeg: bytes | None = None
+        self._closed = False
+        view = self
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):                                 # 静音
+                pass
+
+            def do_GET(self):
+                if self.path.startswith("/stream"):
+                    self.send_response(200)
+                    self.send_header("Age", "0")
+                    self.send_header("Cache-Control", "no-cache, private")
+                    self.send_header("Pragma", "no-cache")
+                    self.send_header(
+                        "Content-Type", "multipart/x-mixed-replace; boundary=frame")
+                    self.end_headers()
+                    try:
+                        while not view._closed:
+                            with view._cond:
+                                view._cond.wait(timeout=2.0)
+                                buf = view._jpeg
+                            if buf is None:
+                                continue
+                            self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\n")
+                            self.wfile.write(f"Content-Length: {len(buf)}\r\n\r\n".encode())
+                            self.wfile.write(buf)
+                            self.wfile.write(b"\r\n")
+                    except (BrokenPipeError, ConnectionResetError):
+                        return
+                else:
+                    body = (
+                        "<html><head><title>lang-conditioned ACT</title></head>"
+                        "<body style='margin:0;background:#111;color:#ddd;"
+                        "font-family:monospace'>"
+                        "<div style='padding:6px'>实时：策略看到的双视角（左 env / 右 wrist）</div>"
+                        "<img src='/stream' style='width:100%;max-width:1280px'>"
+                        "</body></html>").encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+
+        class Srv(socketserver.ThreadingMixIn, http.server.HTTPServer):
+            daemon_threads = True
+
+        for p in range(port, port + 20):
+            try:
+                self.srv = Srv(("127.0.0.1", p), H)
+                self.port = p
+                break
+            except OSError:
+                continue
+        else:
+            raise RuntimeError("8765~8784 都被占用，换 --live-port")
+        self._t = threading.Thread(target=self.srv.serve_forever, daemon=True)
+        self._t.start()
+        self.url = f"http://127.0.0.1:{self.port}/"
+
+    def open_browser(self):
+        import subprocess                                              # noqa: PLC0415
+
+        print(f"   👉 浏览器实时视图：{self.url}（已尝试自动打开）", flush=True)
+        try:
+            subprocess.Popen(["xdg-open", self.url], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+        except Exception:                                              # noqa: BLE001
+            pass
+
+    def push(self, rgb: np.ndarray) -> None:
+        import cv2                                                     # noqa: PLC0415
+
+        ok, buf = cv2.imencode(".jpg", rgb[:, :, ::-1], [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+        if not ok:
+            return
+        with self._cond:
+            self._jpeg = buf.tobytes()
+            self._cond.notify_all()
+
+    def close(self):
+        self._closed = True
+        try:
+            self.srv.shutdown()
+        except Exception:                                              # noqa: BLE001
+            pass
+
+
 # ---------------------------------------------------------------- 写视频
 class MP4Sink:
     """pyav 直写 h264；尺寸恒定（沿用本仓库"尺寸变了就静默丢帧"的教训，这里直接断言）。"""
@@ -324,7 +427,10 @@ def main() -> int:
     ap.add_argument("--calibrate", action="store_true",
                     help="录 6 次做声纹标定（不需要任何 ASR；之后 --mic 用最近邻判定）")
     ap.add_argument("--save-wav", action="store_true", help="把这次麦克风波形存 rl/eval/last_mic.wav")
-    ap.add_argument("--live", action="store_true", help="开一个实时窗口，边说边看他动")
+    ap.add_argument("--live", nargs="?", const="auto", default=None,
+                    choices=("auto", "window", "browser"),
+                    help="实时观看：auto=先试 cv2 窗口，不行自动用浏览器 MJPEG；window/browser 强制")
+    ap.add_argument("--live-port", type=int, default=8765)
     ap.add_argument("--no-play", dest="play", action="store_false", help="跑完不要自动播放视频")
     ap.add_argument("--realtime", action="store_true", help="按真实时间步进（默认全速计算）")
     ap.add_argument("--episode", type=int, default=2400)
@@ -368,12 +474,26 @@ def main() -> int:
     sink = MP4Sink(Path(a.out), a.fps, size)
 
     t0 = time.time()
-    live = a.live
-    if live:
+    live_mode, live_win, live_web = (a.live or None), None, None
+    if live_mode:
         import cv2                                                  # noqa: PLC0415
 
-        cv2.namedWindow("lang-conditioned ACT", cv2.WINDOW_NORMAL)
-        print("（实时窗口已开：按 q 或 ESC 可提前结束，视频照样会存）")
+        if live_mode in ("auto", "window"):
+            try:
+                cv2.namedWindow("lang-conditioned ACT", cv2.WINDOW_NORMAL)
+                live_win = "lang-conditioned ACT"
+                print("（cv2 窗口已开：按 q 或 ESC 可提前结束，视频照样会存）")
+            except cv2.error as e:
+                if live_mode == "window":
+                    raise SystemExit(
+                        "这个 opencv 没有 GUI 支持（多半是 opencv-python-headless）。\n"
+                        "  改用 --live browser（零依赖浏览器视图），或换 opencv-python。\n"
+                        f"  原始错误：{str(e).splitlines()[0][:120]}")
+                print("   cv2 无 GUI 后端 → 自动切浏览器实时视图")
+        if live_win is None:
+            live_web = LiveView(a.live_port)
+            live_web.open_browser()
+    live = live_win is not None or live_web is not None
     try:
         obs, info = env.reset(seed=a.seed)
         step = 0
@@ -391,11 +511,13 @@ def main() -> int:
                 tag = f"instr=#{ix} {target[:28]}  step {step}"
                 shown = banner(frame, tag, (120, 255, 120))
                 sink.write(shown)
-                if live:
-                    cv2.imshow("lang-conditioned ACT", shown[:, :, ::-1])
+                if live_win:
+                    cv2.imshow(live_win, shown[:, :, ::-1])
                     if cv2.waitKey(1) & 0xFF in (27, ord("q")):
                         print("   手动结束")
                         break
+                elif live_web:
+                    live_web.push(shown)
                 if a.realtime:
                     target_t = (k + 1) / env.control_hz
                     slack = target_t - (time.time() - t0)
@@ -412,10 +534,12 @@ def main() -> int:
     finally:
         env.close()
         sink.close()
-        if live:
+        if live_win:
             import cv2                                              # noqa: PLC0415
 
             cv2.destroyAllWindows()
+        if live_web:
+            live_web.close()
 
     expect = EXPECT_BOX.get(ix)
     ok = landed == expect
