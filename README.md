@@ -4,22 +4,28 @@
 
 [![tests](https://github.com/yyl873/python-for-mujoco-SDG/actions/workflows/ci.yml/badge.svg)](https://github.com/yyl873/python-for-mujoco-SDG/actions/workflows/ci.yml)
 [![eval-kit CI](https://github.com/yyl873/embodied-eval-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/yyl873/embodied-eval-kit/actions/workflows/ci.yml)
-![tests](https://img.shields.io/badge/tests-102%20passed-brightgreen)
+![tests](https://img.shields.io/badge/tests-102%20%2B%20142%20passed-brightgreen)
 ![python](https://img.shields.io/badge/python-3.10%20%7C%203.12-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
-逆运动学 → **真接触**抓取（不写 `qpos`）→ 批量合成数据 → lerobot v3 → 语言条件 ACT → **反事实配对评测**证明语言真的进了策略。仿真与数据链路不 `import rclpy`；真机侧的 ROS 2 隔离在 `real_robot/`。
+逆运动学（inverse kinematics, IK）→ **真接触**抓取（true contact，不写 `qpos`）→ 批量合成数据（synthetic data generation, SDG）→ lerobot v3 → 语言条件 ACT → **反事实配对评测**（counterfactual pairing）证明语言真的进了策略。仿真与数据链路不 `import rclpy`；真机侧的 ROS 2 隔离在 `real_robot/`。
 
-## 三个数字
+## 三个数字（每个数字都自带分母）
 
-| 指标 | 实测 | 口径与出处 |
+| 指标 | 实测 | 口径：分母到底是什么 |
 |---|---|---|
-| **真机抓取成功率** | **8.3% → 66.7%**（1/12 → 8/12），两阶段微调后 **75.0%**（9/12） | 同场次、同 22500 步、同机器、同推理参数，只差训练数据 → Fisher **p = 0.0094**；微调后 vs 纯真机 **p = 0.0028**，n=12 pilot |
-| **手指穿模深度** | **0.02 mm** | 闸门 ≤1.6 mm；52/1968 个顶点越界。对照：换指垫前固定指壳在完全下探时穿进盒体 **22.6 mm**，那是"戳"不是"夹" |
-| **真实抬升** | **+122.2 mm**（水平搬运 218.1 mm） | 闸门 ≥50 mm；握持力来自 `mj_step` 接触（峰值 2.37 N，药盒重力 0.113 N），全程不写 `qpos` |
+| **真机抓取成功率**（physical grasp success） | 8.3% → **66.7%**，两阶段微调后 **75.0%** | **每个模型只跑 12 次（n=12 pilot）**：1/12 → 8/12 → 9/12。不是全量评测 |
+| **语言跟随准确率**（follow rate） | **100%（40 / 40）** | 分母 = **成功落进某个箱子的 40 条** rollout；**全样本意图治疗口径（ITT）只有 52.6%（40/76）** |
+| **配对全对率**（both-follow pairs） | **15 / 38** | 分母 = **38 对**"同场景、两条指令各跑一次"的配对；这才是语言真起作用的硬证据 |
+| **手指穿模深度**（mesh penetration） | **0.02 mm** | 闸门 ≤1.6 mm；52 / 1968 个顶点越界。对照：换指垫前的固定指壳穿进盒体 22.6 mm |
+| **真实抬升**（lift under true contact） | **+122.2 mm** | 闸门 ≥50 mm；水平搬运 218.1 mm；握持力来自 `mj_step` 接触（峰值 2.37 N，药盒重力 0.113 N） |
 
-语言侧同口径的三个数：[落对 **40/40 = 100%**（Wilson 下界 0.912）](docs/RESULTS.md)、**配对全对 15/38**、ITT **52.6%**；那 2 维语言通道的权重从 **0.00000** 训到 **0.06747**。
-对照：混叠数据的 v1 在同一评测里"看起来"有 **56.4%**，但它的**配对全对是 0/38**——因为数据里"指令"和"场景"共线，这个 56.4% 只是"总往右放"的副产品。把指令和场景解耦（同场景两条指令首帧 `qpos` 差 **0.000e+00**）之后，才有 15/38 这个真数字。
+Fisher 精确检验（exact test）：抓取 1/12 → 8/12 是 **p = 0.0094**（同场次、同 22500 步、同机器，只差训练数据）；
+微调后 9/12 是 **p = 0.0028**；但**任务成功率 1/12 → 5/12 是 p = 0.155，未达显著**，如实标注。
+
+同一评测口径下，语言通道的权重（per-column L2）从 **0.00000** 训到 **0.06747**。对照：混叠数据的 v1 "看起来"有
+**56.4%**，但它的**配对全对是 0/38**——因为数据里"指令"和"场景"共线，那个 56.4% 只是"总往右放"的副产品。
+把指令与场景解耦（同场景两条指令首帧 `qpos` 差 **0.000e+00**）之后，才有 15/38 这个真数字。
 
 ## 真机录像（上表那一行的原始票据）
 
@@ -35,7 +41,7 @@ GIF 1.7 MB，完整画质见下方 mp4。
 
 重录/换片段：`make real-clips REAL_CMP=... REAL_FT=...`（默认读 `/home/yyl/视频/` 下那两个文件）。
 
-## 真物理：六项接触闸门（"合成数据"和"摆拍"的区别）
+## 真物理：六项接触保真闸门（six contact-fidelity gates —— "合成数据"和"摆拍"的区别）
 
 假抓取很容易做得好看：指尖压在盒顶往下揉，再整体抬起来——视频里像抓到了，实际载荷是
 "往下压"而不是"两侧夹"，松爪那一刻盒子就掉。所以判据不是"抬起来了没"，而是六个互相
@@ -69,7 +75,7 @@ print(report.to_markdown())
 抓取本身也验过：IK 24 次迭代收敛、末端残差 **0.923 mm**；握持力峰值 **2.37 N**（药盒自重 0.113 N），
 法向 z 均值 **−0.002**（+1 是纯下压、0 是纯侧夹）。
 
-## 一次排障：65° 的腕部冲突
+## 一次排障（debugging）：65° 的腕部冲突
 
 1. 真机换成带指垫的夹爪后，凡是"抓到了却放不掉"的 9 次，模型张开夹爪那一刻的 `wrist_flex` 均值停在 **≈39°**——真机数据是 **+63°**、仿真数据是 **−2°**，39° 是**两套数据里都不存在的位姿**。
 2. 根因：指垫把 TCP 往后推了 **11 mm**，IK 为了够到同一个点就把整个腕部转了 **≈65°**；本臂 lift / elbow / flex **三轴平行**，末端指向只由三者之和决定，所以"每关节差 65°"和"之和差 65.9°（真机 +63.4 / 仿真 −2.5）"是同一件事——这个位姿在仿真里合法，在真机上就是提歪盒子并按不出释放姿态。
@@ -89,21 +95,32 @@ print(report.to_markdown())
 
 ```bash
 make test        # 102 个测试：从 rl/eval/*.json 复算 README 里的每一个数字
-make kit-test    # 134 个测试：评测工具包的统计与反事实协议
+make kit-test    # 142 个测试：评测工具包的统计与反事实协议
 make tables      # 从 rl/eval/*.json 重新生成 docs/RESULTS.md（数字不许手抄）
 make demo        # 出一条演示视频（可加 --mic 用语音下指令）
 ```
 
 测试分两处，都是标准 pytest：`tests/`（102 个，仓库级：复算数字、守文档与代码对齐、守 README 链接）
-和 `embodied-eval-kit/tests/`（134 个，评测工具包的统计与反事实协议）。两个仓库都跑 CI，badge 点进去看得到绿。
+和 `embodied-eval-kit/tests/`（142 个，评测工具包的统计与反事实协议）。两个仓库都跑 CI，badge 点进去看得到绿。
 
 `make test` 里的每个断言都指向一个已入库的产物：`40/40`、`15/38`、`p=0.0028`、`p=0.0094` 不是写死的字符串，而是从 `rl/eval/*.json` 用 [`embodied-eval-kit`](embodied-eval-kit/README.md) 重算出来的结果——数字对不上，测试就红。
+
+## 核心入口速览（从哪个文件开始看）
+
+| 你想看 | 入口 |
+|---|---|
+| 合成数据怎么造（含配对数据） | [`collect/collect.py`](collect/collect.py)；随机化在 `collect/collect.py` 的 `apply_*`，导出在 [`collect/export_lerobot.py`](collect/export_lerobot.py) |
+| **物理是真的吗**（核心差异化） | [`grasp/contact_gates.py`](grasp/contact_gates.py) + [`tools/probe_contact_audit.py`](tools/probe_contact_audit.py)（`make audit`） |
+| 策略怎么训（含断电续跑/降档/显卡闸门） | [`rl/run_lang_train.sh`](rl/run_lang_train.sh) → [`rl/train.py`](rl/train.py) |
+| 评测口径怎么定 | [`rl/eval_lang.py`](rl/eval_lang.py)（`make eval`）+ [`embodied-eval-kit/eeval/counterfactual.py`](embodied-eval-kit/eeval/counterfactual.py) |
+| 演示 / 语音链路 | [`rl/demo_lang_policy.py`](rl/demo_lang_policy.py)（`make demo`） |
+| 真机 ROS 2 包 | [`real_robot/so_arm101_bringup/`](real_robot/so_arm101_bringup) |
 
 ## 仓库结构
 
 ```
 model/               MJCF 与 14 个网格（改模型只动这里）
-ik/ grasp/ render/ collect/   仿真四步；grasp/contact_gates.py 是六项接触闸门的唯一实现（有单测）
+ik/ grasp/ render/ collect/   仿真四步；grasp/contact_gates.py 是六项接触保真闸门的唯一实现（有单测）
 rl/                  训练壳（断电续跑/降档/显卡闸门）、反事实评测、演示与语音链路
 real_robot/          真机侧 ROS 2 bringup（URDF + MoveIt2 + ros2_control + SDGGenerator 节点）——唯一碰 ROS 的地方
 embodied-eval-kit/   可独立发布的评测工具包：手写精确统计 + 反事实配对协议 + 三态回执（134 个测试，零依赖）
@@ -118,7 +135,7 @@ docs/                6 份文档 + 自动生成的 RESULTS.md（索引见 docs/R
 - 语言是 **2 维 one-hot（左/右）**，**不是自由文本理解**，换说法不支持；策略**只在仿真里评测过**，没做真机闭环。
 - 真机 A/B 是 **n=12 的 pilot**：抓取显著（p = 0.0094 / 0.0028），**任务成功率 p = 0.155 未达显著**。
 - 我做错过一次结论：先用一个数据量/步数都不对齐的对照得出"仿真无增益"，被同场次同步数的干净对照推翻。两次修正都留在 [`docs/REAL_AB_RESULTS_2026-10-28.md`](docs/REAL_AB_RESULTS_2026-10-28.md) §9–§10 里。
-- 残差 RL **是负结果**：洁净口径 26.7% → 13.3%，根因是奖励被钻空子（穿透罚 −3 ≫ 抓取奖 +0.5）。如实判负，见 [`docs/REPORT_RESIDUAL_RL.md`](docs/REPORT_RESIDUAL_RL.md)。
+- 残差强化学习（residual RL）**是负结果**：洁净口径 26.7% → 13.3%，根因是奖励被钻空子（穿透罚 −3 ≫ 抓取奖 +0.5）。如实判负，见 [`docs/REPORT_RESIDUAL_RL.md`](docs/REPORT_RESIDUAL_RL.md)。
 - 缺项：现代 BC 对照（DP / VQ-BeT 只差跑一次）、chunk_size 等消融、文本指令版、真机闭环。
 
 ## 文档

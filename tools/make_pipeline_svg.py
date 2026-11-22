@@ -229,7 +229,7 @@ def build() -> str:
            size=13, weight="650")
     for row, chunk in enumerate([
         "make test        # 102 tests over this repository's own artifacts",
-        "make kit-test    # 134 tests over the evaluation kit",
+        "make kit-test    # 142 tests over the evaluation kit",
         "make tables      # regenerate docs/RESULTS.md from rl/eval/*.json",
     ]):
         c.text(px + 20, cy + 50 + row * 20, chunk, size=11.5, fill=ACCENT, family=MONO)

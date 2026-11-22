@@ -45,6 +45,14 @@ def test_no_tracked_file_over_5mb(repo_root):
         f"{rel} ({mb:.1f}MB)" for rel, mb in sorted(offenders))
 
 
+def _is_tracked(path: str, tracked: set[str]) -> bool:
+    """文件必须在索引里；目录只要"里面至少有一个被跟踪的文件"就算入库。"""
+    if path in tracked:
+        return True
+    prefix = path.rstrip("/") + "/"
+    return any(entry.startswith(prefix) for entry in tracked)
+
+
 def test_readme_relative_links_point_to_existing_files(repo_root):
     """README 里所有相对路径的 markdown 链接/图片都必须真实存在**且已入库**。
 
@@ -66,7 +74,7 @@ def test_readme_relative_links_point_to_existing_files(repo_root):
         checked += 1
         if not (repo_root / path).exists():
             missing.append(t)
-        elif tracked and path not in tracked:
+        elif tracked and not _is_tracked(path, tracked):
             untracked.append(t)
     assert checked >= 5, f"README 里只解析到 {checked} 个相对链接，解析可能失效了"
     assert not missing, f"README 里有死链：{missing}"

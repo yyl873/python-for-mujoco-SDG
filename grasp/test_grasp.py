@@ -430,7 +430,7 @@ class Arm:
     # ---------- 接触 ----------
     def _contacts_with(self, target_bodies):
         out6 = np.zeros(6)
-        res = []
+        contacts_with_target = []
         for i in range(self.d.ncon):
             c = self.d.contact[i]
             b1 = int(self.m.geom_bodyid[c.geom1])
@@ -446,11 +446,11 @@ class Arm:
             mujoco.mj_contactForce(self.m, self.d, i, out6)
             f = np.asarray(out6[:3])
             nrm = np.asarray(c.frame[:3])
-            res.append(dict(body=other,
-                            F=float(np.linalg.norm(f)),
-                            Fn=float(abs(f @ nrm)),
-                            dist=float(c.dist)))
-        return res
+            contacts_with_target.append(dict(body=other,
+                                             F=float(np.linalg.norm(f)),
+                                             Fn=float(abs(f @ nrm)),
+                                             dist=float(c.dist)))
+        return contacts_with_target
 
     def grip_contacts(self):
         r = self._contacts_with((self.grip, self.jaw))
@@ -481,7 +481,7 @@ class Arm:
         `_contacts_with()` 只筛与药盒(object)相关的接触，口径不对，所以这里单写：
         逐个接触对判断"一侧是木盒、另一侧既不是药盒也不是支撑面"。
         """
-        res = []
+        hits = []
         for i in range(self.d.ncon):
             c = self.d.contact[i]
             b1 = int(self.m.geom_bodyid[c.geom1])
@@ -496,8 +496,8 @@ class Arm:
             #   （实测 object_b 在箱内时 box_hits 报 428~468 帧，几乎整条 episode）。
             if self.name(other) not in ARM_BODIES:
                 continue
-            res.append((other, int(c.geom1), int(c.geom2)))
-        return res
+            hits.append((other, int(c.geom1), int(c.geom2)))
+        return hits
 
 
     def other_hits(self):
@@ -507,9 +507,9 @@ class Arm:
         对应需求："夹取/搬运过程中碰到别的箱子/药盒要扣分"。
         口径与 `box_hits()` 完全一致：一侧是指定物体、另一侧既不是目标药盒也不是支撑面。
         """
-        res = []
+        other_arm_hits = []
         if not self.other_ids:
-            return res
+            return other_arm_hits
         others = set(self.other_ids)
         for i in range(self.d.ncon):
             c = self.d.contact[i]
@@ -527,8 +527,8 @@ class Arm:
                 continue          # 目标药盒落在木箱里 / 物体贴桌面，都正常
             if self.name(other) not in ARM_BODIES:
                 continue          # ★ 只算"手臂撞过去"，两个箱/盒之间的静态接触不算
-            res.append((int(target), int(c.geom1), int(c.geom2)))
-        return res
+            other_arm_hits.append((int(target), int(c.geom1), int(c.geom2)))
+        return other_arm_hits
 
     def prev_obj_pos(self):
         """木箱里"之前的药盒"当前中心；没有该物体返回 None。"""

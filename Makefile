@@ -37,7 +37,7 @@ tables:
 test:
 	$(RUN) $(PY) -m pytest tests -p no:pytest_cov
 
-## kit-test    评测工具包的测试（134 个，纯标准库，约 6 s）
+## kit-test    评测工具包的测试（142 个，纯标准库，约 6 s）
 kit-test:
 	cd embodied-eval-kit && $(RUN) $(PY) -m pytest tests -p no:pytest_cov
 
