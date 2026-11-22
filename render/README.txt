@@ -191,7 +191,7 @@
       * 两台相机各自算（腕部相机像素速度更大，天然更糊），这就是"跟着真实运动走"。
     这类随机化是"免费"的：不改几何、不改相机内外参、不跑物理，纯后处理。
 
-    可复现（任务书硬要求）：所有随机量来自同一个 np.random.default_rng(seed)，
+    可复现（硬要求）：所有随机量来自同一个 np.random.default_rng(seed)，
     按固定顺序抽样。同 seed + 同一批输入帧 -> 逐像素相同（慢漂移也是同一 RNG 驱动）。
     实测自检：
         同 seed 两次逐像素相同 ✅；换 seed 最大像素差 23（确实不同）✅
@@ -239,7 +239,7 @@
       轨迹 npz 里 meta_json 也有同一份（只拿 npz 的下游也能读）：
           "success": false, "success_info": {"threshold_mm": 50.0, "lift_mm": 0.0,
                                              "hold_mm": 0.0, "reasons": ["lift_too_low"]}
-      判据（任务书口径，阈值 50mm）：
+      判据（验收口径，阈值 50mm）：
           success = 抬升(阶段 lift 末 - grasp 末) >= 50mm  且  搬运段末没塌回去
           reasons: lift_too_low = 药盒没离开桌面（夹空/夹偏/压翻，最常见）
                    slipped      = 抬起来了，但搬运途中掉了（搬运末抬升 < 峰值一半）

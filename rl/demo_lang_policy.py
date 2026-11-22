@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """rl/demo_lang_policy.py —— 语言条件 ACT 的"看得见"演示：一句话 → 仿真里挑箱子 → 出 mp4
 
-为什么要它：`rl/run_lang_eval.sh` 只出 JSON（落点/成功率），面试或汇报时没法看。
+为什么要它：`rl/run_lang_eval.sh` 只出 JSON（落点/成功率），汇报或演示时没法看。
 本脚本把同一套策略跑成视频：策略看到的画面（env + wrist 双视角并排）+ 烧上去的指令横幅。
 
 指令怎么进来（三选一）

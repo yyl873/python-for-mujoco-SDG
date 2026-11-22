@@ -6,7 +6,7 @@ test_render.py — 纯净渲染采集管线（步骤三）
 
 一、为什么切成 record / render 两段
 ----------------------------------------------------------------
-任务书要求「剥离所有控制逻辑，只负责渲染」。用"数据契约"来切，而不是
+验收要求「剥离所有控制逻辑，只负责渲染」。用"数据契约"来切，而不是
 靠约定或注释：
 
     record : 跑真物理（mj_step），把每帧状态 + 真实接触力写进 episode.npz
@@ -152,7 +152,7 @@ def _sha256(path: Path):
     return h.hexdigest()[:16]
 
 # ============================================================
-# 第 1 段  常量区（全部来自步骤二/任务书，不新造）
+# 第 1 段  常量区（全部来自步骤二/既有验证，不新造）
 # ============================================================
 
 CAMS = ("env_camera", "wrist_camera")   # 模型里已定义的两个相机
@@ -341,7 +341,7 @@ GRASP_TILT_MAX_DEG = 5.0    # 夹稳那一刻药盒相对竖直的最大倾角
 TOL_MM = 5.0
 
 # ---- 成功标签判据（数据工程用；只读轨迹数组，不影响物理与渲染）-------------
-# 任务书口径："最后的抬升高度 < 50mm 视为失败"。
+# 验收口径："最后的抬升高度 < 50mm 视为失败"。
 # 50mm 不是拍脑袋：药盒半高 26mm、木盒口 z=50mm，抬升 50mm 已明确越过
 # "只是被指垫顶了一下 / 蹭了一下"的量级；正样本实测 103mm，离阈值 51mm，余量足。
 SUCCESS_LIFT_MM = 50.0
@@ -592,7 +592,7 @@ def evaluate_success(rec_meta: dict, ep: dict) -> dict:
     """
     判定一条 episode 是不是"抓起来了"（正样本），返回可直接写进 JSON 的 dict。
 
-    判据（任务书口径）：
+    判据（验收口径）：
       success = 抬升 >= SUCCESS_LIFT_MM 且 没有中途滑落
       抬升    = z(阶段 lift 末) - z(阶段 grasp 末)     <- record 的 metrics.rise_mm，同源
       滑落    = 有 transport 段，且 transport 末帧"相对初始位的抬升"塌回峰值的一半以下
@@ -711,7 +711,7 @@ def _ramp_gripper(a: Arm, rec: EpisodeRecorder, phase: str, g0, g1, n_steps,
 
     合爪(GRIP_APPROACH->GRIP_SHUT)和开爪(GRIP_SHUT->GRIP_RELEASE)都走这一个函数：
     物理上"释放"就是"合爪的逆过程"，同一个写法、只有起止值相反，
-    不引入任何新控制机制（任务书要的纯 position 控制）。
+    不引入任何新控制机制（仓库要求的纯 position 控制）。
 
     q_arm：合爪期间手臂 ctrl 写什么。默认 None = 冻结在当前 qpos（hack，用来"只看夹爪"）。
            传了就用这条目标（= 下探段的目标 q_gsp）—— 这才是真机控制器在合爪时的行为：
@@ -1131,7 +1131,7 @@ class SensorModel:
         现在：调用方把 TCP 在图像平面上的像素速度传进来（speed_px），
         拖影长度 = clip(k*speed_px, 0, max)，静止帧为 0。
 
-    可复现性（任务书硬要求）：
+    可复现性（硬要求）：
         所有随机量都来自同一个 np.random.default_rng(seed)，按固定顺序抽样；
         慢漂移也是同一 RNG 驱动 -> 同 seed + 同输入帧 -> 逐像素相同。
 
@@ -1302,7 +1302,7 @@ class SensorModel:
                 ang_deg = float(ai) * 360.0 / self._MOTION_ANGLES
                 ker = self._motion_kernel(round(mp * 2) / 2, ai)   # 量化到 0.5 px，命中缓存
                 img = cv2.filter2D(img, -1, ker, borderType=cv2.BORDER_REPLICATE)
-        # 镜头/像素的轻微失焦（任务书原要求的高斯模糊），与运动模糊是两回事，都保留
+        # 镜头/像素的轻微失焦（原要求的高斯模糊），与运动模糊是两回事，都保留
         if self.ksize:
             img = cv2.GaussianBlur(img, (self.ksize, self.ksize), self.blur_sigma)
 
@@ -1805,7 +1805,7 @@ def cmd_render(args):
                     drawn=sensor.params()),
         cameras={c: dict(name=c, intrinsics=rig.intrinsics(c)) for c in CAMS},
         phases=list(PHASES),
-        # ★ 顶层成功标签（任务书要求）：抓取失败时是 false，而不是"没有这条数据"。
+        # ★ 顶层成功标签（验收要求）：抓取失败时是 false，而不是"没有这条数据"。
         #   判据与原因见 success_info（含 threshold_mm / lift_mm / hold_mm / reasons）。
         success=bool(succ["success"]),
         success_info=succ,

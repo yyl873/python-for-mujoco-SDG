@@ -46,9 +46,9 @@ ros2 launch so_arm101_bringup control.launch.py
 
 ## 已处理的整理（2026-11-22）
 
-- ✅ 原名 `test/aaa.py`（302 行，`SDGGenerator(Node)`：等 `/joint_states`、调 MoveIt2、
-  驱动 MuJoCo 渲染快照）已移入包内并改名为 `so_arm101_bringup/sdg_generator.py`，
-  同时在 `setup.py` 注册了 console script：`ros2 run so_arm101_bringup sdg_generator`。
+- ✅ 数据生成节点收进包里：`so_arm101_bringup/sdg_generator.py`（302 行，`SDGGenerator(Node)`：
+  等 `/joint_states`、调 MoveIt2、驱动 MuJoCo 渲染快照），并在 `setup.py` 注册了
+  console script：`ros2 run so_arm101_bringup sdg_generator`。
 - ✅ `setup.py` 的 `data_files` 改成 `share(sub, pattern)` 帮助函数：**目录缺失不再报错**
   （原先写死 `glob('mjcf/*.xml')`），`description` 也补成了真实内容。
 
