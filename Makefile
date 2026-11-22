@@ -100,10 +100,14 @@ train:
 audit:
 	$(RUN) MUJOCO_GL=egl $(RL_PY) tools/probe_contact_audit.py
 
+## publish     发布前自检：自检套件 / 密钥 / 大文件 / README 链接 / 待推送状态
+publish:
+	bash tools/pre_push_check.sh
+
 ## clean       只清缓存与演示中间物，不动真实结果
 clean:
 	find . -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
 	rm -f rl/eval/demo_loop_r*.mp4
 	@echo "✓ 已清理（结果 json 与 ckpt 未动）"
 
-.PHONY: help tables check kit-demo weights assets demo demo-right demo-loop bc-compare eval train audit clean
+.PHONY: help tables check kit-demo weights assets demo demo-right demo-loop bc-compare eval train audit publish clean
