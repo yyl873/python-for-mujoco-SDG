@@ -5,7 +5,7 @@
 ----
   # 抽第 0 帧与第 3.5 秒的帧（默认存 inspect/frames/）
   env -u PYTHONHOME -u PYTHONPATH MUJOCO_GL=egl \
-    /home/yyl/miniforge3/envs/lerobot312/bin/python tools/dump_frames.py \
+    /home/yyl/miniforge3/envs/lerobot312/bin/python tools/probes/dump_frames.py \
       --video /home/yyl/lerobot_datasets/yyl100_dataset_fixed/videos/observation.images.wrist/chunk-000/file-000.mp4 \
       --at 0.0,3.5,8.0 --out inspect/frames/real_ep0_wrist
 

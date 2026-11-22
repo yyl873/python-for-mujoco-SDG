@@ -1,59 +1,168 @@
 # embodied-eval-kit
 
-具身策略评测的最小工具包：**让"策略行不行"变成可复算的数字**，而不是一句"感觉变好了"。
+**Evaluation numbers that survive scrutiny.** Exact small-sample statistics, a
+counterfactual pairing protocol for language-conditioned policies, clean-success gates,
+and three-state receipts — in ~1,600 lines of dependency-free Python.
 
-零依赖（纯标准库），三件事：
+```
+python -m pip install -e ".[test]"
+python examples/demo_real_run.py     # real 76-rollout log, no downloads
+python -m pytest tests -q            # 134 tests, ~6 s, standard library only
+```
 
-| 模块 | 解决什么问题 | 关键 API |
-|---|---|---|
-| `eeval.stats` | 小样本比例不能只报 `k/n`：40/40 的 95% 下界只有 **91.2%** | `wilson(k, n)`、`binom_two_sided(k, n)`、`fisher_exact_2x2(a,b,c,d)`、`mcnemar_exact(b,c)` |
-| `eeval.judge` | "抬起来就算成功"会奖励作弊（压得更深）；洁净判据要拆成 4 条 | `CleanCfg`、`Episode`、`judge_episode(ep, cfg)` |
-| `eeval.counterfactual` | 判断"语言有没有被用上"：同场景换指令，落点变不变 | `aggregate(rows, task_order, expect_map=…)`、`aggregate_pairs(...)`、`verdict(summary)` |
-| `eeval.receipt` | 三态回执 `ok / warn / fail`，**不许把 warn 写成 ok** | `Receipt().add(name, status, **facts)`、`exit_code(receipt)` |
+The motivating failure, from the project this kit was extracted from: a policy was
+reported at **100% instruction-following accuracy**. It was also true that the policy put
+the box on the instructed side in only **15 of 38 scenes**. Both statements came from the
+same data. The first used "rollouts that landed in *some* box" as its denominator; the
+second used paired counterfactual replays. Choosing the denominator is what decides
+whether a robot demo is a result or a story.
 
-## 为什么需要它（都是踩过的坑）
+| what | why it exists |
+|---|---|
+| `eeval.stats` | small samples lie: 40/40 is **91.2%** at the lower 95% bound, not 100% |
+| `eeval.counterfactual` | one number cannot both measure skill and resist a degenerate policy |
+| `eeval.judge` | "it lifted" rewards digging into the object and lifting the debris |
+| `eeval.receipt` | a stage that prints `warn` must never roll up to `ok` |
 
-1. **只报成功率会骗人**：一个"总往右放"的策略，在指令一半是"右"时也有 50% 成功率。
-   必须同时报 **follow_acc（分母=落箱）/ ITT（分母=全部）/ 配对全对（分母=全部配对）** 三个口径。
-2. **只看抬升会奖励作弊**：本项目残差 RL 在旧口径上是 +5.6pp，按洁净口径（不歪盒 + 不穿透 + 连续抬升）
-   却是 26.7% → 13.3%。判据严格度直接决定结论正负。
-3. **warn 被写成 ok 等于伪造结论**：流水线自判"成功"、同时打印"约束 ❌ 药盒被撞动 6.85 mm"——正确回执是 warn。
-
-## 快速开始
+## Try it in 30 seconds
 
 ```bash
-python examples/demo_synthetic.py     # 合成数据跑通全部口径（不需要 mujoco/数据集）
-python tests/test_eeval.py           # 零依赖测试（也可用 pytest）
+python -m eeval report examples/data/language_pair_76rows.json \
+  --tasks "Put the medicine box into the left wooden box.,Put the medicine box into the right wooden box." \
+  --boxes "target_box,target_box_b"
 ```
 
-真实用法（配合自己项目的 rollout json）：
+```text
+**Verdict: instruction followed** (pass)
+
+| estimand | value | denominator |
+|---|---|---|
+| follow_acc | 100.0% | 40 rollouts that landed |
+| follow_acc (ITT) | 52.6% | 76 rollouts |
+| pairs both followed | 15 / 38 (39.5%) | complete pairs |
+| Wilson 95% of follow_acc | 91.2% - 100.0% | - |
+| p vs chance (0.50) | < 1e-6 | - |
+| side bias p (landing counts {'target_box': 25, 'target_box_b': 15}) | 0.1539 | - |
+```
+
+Exit code `0` when the pre-registered verdict passes, `1` when the report is produced
+but the verdict fails, `2` on bad input — so a shell or CI job can gate on it.
+
+## The protocol
+
+A language-conditioned policy is evaluated by replaying **the same scenes** under **both
+instructions**. Outcomes then come in pairs, and three estimands fall out, each with a
+defensible denominator:
+
+| estimand | denominator | question |
+|---|---|---|
+| `follow_acc` (per-protocol) | rollouts that landed in **some** box | when it did put the box down, was it the instructed box? |
+| `follow_acc_itt` | **every** rollout | did the whole task succeed? |
+| `pairs_both_follow` | complete `(scene, seed)` pairs | did both instructions of the same scene land where told? |
+
+Only the third one is unfakeable: a policy that always drops right scores 100% on half
+the rollouts, **0 pairs**. `Report` also publishes the failure breakdowns
+(`landed_correct` / `landed_wrong_box` / `never_landed`), the landing distribution with a
+bias test, McNemar on the discordant pairs, and the chance baselines a reader would
+otherwise have to reconstruct. See [`docs/PROTOCOL.md`](docs/PROTOCOL.md) for the formal
+definitions, the worked example, and the six ways this analysis is commonly fudged.
+
+## API in one screen
 
 ```python
-from eeval import aggregate, aggregate_pairs, verdict
+from eeval import Protocol, Rollout, analyze_rows
 
-TASKS  = ["把药盒放进左边的木箱", "把药盒放进右边的木箱"]
-EXPECT = {TASKS[0]: "box_a", TASKS[1]: "box_b"}
+protocol = Protocol(
+    instructions=("left", "right"),               # order == the policy's language slot
+    expected_box={"left": "box_a", "right": "box_b"},
+    min_follow_acc=0.80, min_wilson_lower=0.50,   # pre-registered, fixed before the run
+    min_pairs_both_follow=1,
+)
+report = analyze_rows(rows, protocol)   # rows: [{episode_id, seed, ix, landed_box}, ...]
 
-s = aggregate(rows, TASKS, {}, expect_map=EXPECT)   # rows: [{episode_id, seed, ix, landed_box}]
-s.update(aggregate_pairs(rows, TASKS, EXPECT))
-s["verdict"] = verdict(s)      # 预注册判据：follow_acc≥0.80 且 Wilson 下界>0.50 且配对全对>0
+report.follow_acc          # 1.0
+report.follow_wilson       # (0.9124, 1.0)   -- the honest version of "100%"
+report.follow_acc_itt      # 0.5263
+report.pairs_both_follow   # 15
+report.verdict.passed      # True
+report.to_markdown()       # the table above
+report.to_json()           # everything, for a results file
 ```
 
-## 数值校验（不是拍脑袋的公式）
+| module | functions |
+|---|---|
+| `stats` | `wilson`, `wilson_interval`, `clopper_pearson`, `proportion`, `binom_pmf/cdf/sf`, `binom_two_sided`, `fisher_exact_2x2`, `fisher_test_2x2`, `mcnemar_exact`, `paired_odds_ratio_interval`, `newcombe_diff_ci`, `two_proportion_diff`, `benjamini_hochberg`, `log_binom_coef` |
+| `counterfactual` | `Protocol`, `Rollout`, `Report`, `Verdict`, `analyze`, `analyze_rows`, `aggregate`, `aggregate_pairs`, `verdict` |
+| `judge` | `CleanCfg`, `Episode`, `GateResult`, `judge_episode`, `judge_many` |
+| `receipt` | `Stage`, `Receipt`, `exit_code`, `STATUS` |
 
-| 输入 | 本实现 | 来源 |
+Every interval function takes `alpha` (default `0.05`); every test returns a plain
+`float`; every result object has `as_dict()` and a readable `__str__`.
+
+## Numbers this code has to reproduce
+
+These are asserted in `tests/`, not pasted from memory:
+
+| input | output | where it comes from |
 |---|---|---|
-| `wilson(40, 40)` | 下界 **0.9124** | 本项目语言条件最终评测 40/40 |
-| `fisher_exact_2x2(1,11,9,3)` | **0.0028** | 本项目真机 A/B（纯真机 1/12 vs 微调后 9/12） |
-| `binom_two_sided(5,10)` | 1.0（抛硬币水平不显著） | — |
+| `wilson(40, 40)` | lower bound **0.9124** | final language-conditioned evaluation, 40/40 |
+| `fisher_exact_2x2(1, 11, 9, 3)` | **p = 0.0028** | real-robot A/B: 1/12 vs 9/12 grasp success |
+| `fisher_exact_2x2(1, 11, 8, 4)` | **p = 0.0094** | same-session control, only the training data differs |
+| `mcnemar_exact(8, 1)` | **p = 0.039** | paired release-success comparison |
+| `analyze_rows(language_pair_76rows.json)` | 15/38 pairs, ITT 52.6% | the project README's table |
 
-## 设计约束
+## Why hand-written statistics
 
-- **零依赖**：不方便装 scipy 的环境（机器人机载、评测机、CI）优先。
-- **小样本友好**：全部用精确检验/区间，不用正态近似。
-- **判据与聚合分离**：`judge` 只管"这条算不算成功"，`counterfactual` 只管"语言有没有起作用"，
-  互不耦合，方便替换成你任务自己的判据。
+`scipy` would have been one import. The kit is used on robot computers, on CI runners
+with no scientific stack, and on an air-gapped lab machine, so it depends on nothing.
+Doing it by hand is only acceptable if it is checked, so the tests compare each routine
+against:
 
-## License
+- **exact rational arithmetic** (`fractions.Fraction` + `math.comb`) — an independent
+  implementation that shares no arithmetic with the float code;
+- **closed forms** that hold exactly at the extremes (`k = 0`, `k = n`) for
+  Clopper-Pearson;
+- **the defining equation** of each interval, evaluated at its own bounds (the Wilson
+  bounds satisfy the score equation to 1e-6);
+- **Monte-Carlo coverage** at the nominal level for Wilson, Clopper-Pearson and
+  Newcombe's difference interval.
 
-MIT
+```
+$ python -m pytest tests -q
+134 passed in 5.6s
+```
+
+| test file | what it protects |
+|---|---|
+| `test_stats_exact.py` | float code vs exact rationals, tail underflow, monotone symmetries |
+| `test_stats_intervals.py` | closed forms, score equation, simulated coverage |
+| `test_stats_paired.py` | the published p-values, Newcombe's definition, BH ordering |
+| `test_stats_errors.py` | bad input fails loudly instead of producing a wrong denominator |
+| `test_counterfactual.py` | estimands, pair matrix, incomplete pairs, degenerate-policy detection |
+| `test_real_run.py` | the real 76-rollout log reproduces the published table exactly |
+| `test_judge.py` | gate boundaries, consecutive-run rule, reward-hack patterns |
+| `test_receipt.py`, `test_cli.py` | three-state roll-up, exit codes, end-to-end CLI |
+
+## What it is not
+
+- **Not a metrics framework.** No plotting, no experiment tracking, no dataset loaders.
+  It turns a rollout log into a defensible number and gets out of the way.
+- **Not for huge samples.** Exact tests are `O(n)` per call; fine for hundreds of
+  rollouts, silly for a million. Use a normal approximation at that scale and say so.
+- **Not a substitute for replicates.** A single seed, a single scene set, and n = 12
+  trials stay single-sample statements no matter how exact the arithmetic is. The kit
+  makes the uncertainty visible; it cannot manufacture evidence.
+- **Not free of assumptions.** Independence between scenes, a fixed instruction set, and
+  a judge that actually measures what it claims. Everything the protocol assumes is
+  written down in [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
+
+## Layout
+
+```
+eeval/           stats.py  counterfactual.py  judge.py  receipt.py  cli.py  __main__.py
+examples/        demo_real_run.py  demo_synthetic.py  data/language_pair_76rows.json
+tests/           8 files, 134 tests, no dependencies beyond pytest
+docs/            PROTOCOL.md  (formal definitions, worked example, common mistakes)
+```
+
+Zero runtime dependencies · MIT licensed · Python ≥ 3.10 · CI on 3.10 / 3.12 / 3.13

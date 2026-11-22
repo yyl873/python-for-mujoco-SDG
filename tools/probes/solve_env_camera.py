@@ -18,7 +18,7 @@ docs/REAL_DATASET_CAMERA_AUDIT.md §9）：
 用法
 ----
     env -u PYTHONHOME -u PYTHONPATH MUJOCO_GL=egl \
-        /usr/bin/python3 tools/solve_env_camera.py            # 只解，不写文件
+        /usr/bin/python3 tools/probes/solve_env_camera.py            # 只解，不写文件
     ... --write                                               # 解完直接改写 model/so_arm101.xml
     ... --target-u 504.5 --target-top 286 --target-w 270       # 换目标
 """
@@ -33,7 +33,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]   # tools/probes/<this> -> 仓库根
 XML = ROOT / "model" / "so_arm101.xml"
 W, H = 640, 480
 

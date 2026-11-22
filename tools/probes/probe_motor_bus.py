@@ -6,10 +6,10 @@
 
 用法：
   env -u PYTHONHOME -u PYTHONPATH \
-  /home/yyl/miniforge3/envs/lerobot312/bin/python tools/probe_motor_bus.py
+  /home/yyl/miniforge3/envs/lerobot312/bin/python tools/probes/probe_motor_bus.py
 
   # 指定端口
-  ... tools/probe_motor_bus.py --port /dev/serial/by-id/usb-1a86_USB_Single_Serial_5B91029226-if00
+  ... tools/probes/probe_motor_bus.py --port /dev/serial/by-id/usb-1a86_USB_Single_Serial_5B91029226-if00
 
 判读要点（Feetech 是菊花链，信号逐个电机转发）：
   1~4 在线、5~6 失联  → 断点在 4→5 之间，或 5 号没电（最常见：排线松/脱落）

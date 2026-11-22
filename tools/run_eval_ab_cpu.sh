@@ -18,7 +18,7 @@ for pair in "armA:17500" "armB:22500"; do
     step6=$(printf '%06d' "$step")
     echo
     echo "########## $arm step=$step $(date) ##########"
-    env -u PYTHONHOME -u PYTHONPATH "$PY" tools/eval_act_holdout.py \
+    env -u PYTHONHOME -u PYTHONPATH "$PY" tools/probes/eval_act_holdout.py \
         --ckpt "/home/yyl/lerobot/outputs/train/act_${arm}/checkpoints/${step6}/pretrained_model" \
         --device cpu --sample-every 10 --batch-size 8 \
         --out "logs/eval_holdout_${arm}.json"

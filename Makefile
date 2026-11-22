@@ -27,15 +27,31 @@ help:
 tables:
 	$(RUN) $(PY) tools/make_tables.py
 
-## check       仓库自检：结果表最新 / json 字段齐 / 脚本可编译 / 评测工具包测试通过
+## test        仓库级 pytest：从已入库产物复算 README 的每个数字（83 个，约 2 s，无 GPU）
+test:
+	$(RUN) $(PY) -m pytest tests -p no:pytest_cov
+
+## kit-test    评测工具包的测试（134 个，纯标准库，约 6 s）
+kit-test:
+	cd embodied-eval-kit && $(RUN) $(PY) -m pytest tests -p no:pytest_cov
+
+## svg         重新生成 README 顶部的架构图（数字取自 rl/eval/*.json）
+svg:
+	$(RUN) $(PY) tools/make_pipeline_svg.py
+
+## check       仓库自检：结果表最新 / 架构图最新 / 脚本可编译 / 两套测试通过
 check:
 	$(RUN) $(PY) tools/make_tables.py --check
-	$(RUN) $(PY) -m py_compile tools/make_tables.py rl/probe_lang_weight.py rl/demo_lang_policy.py
-	$(RUN) $(PY) embodied-eval-kit/tests/test_eeval.py
-	@echo "✓ 语法、结果表、评测工具包自检全部通过"
+	$(RUN) $(PY) tools/make_pipeline_svg.py --check
+	$(RUN) $(PY) -m compileall -q tools rl tests embodied-eval-kit/eeval
+	$(RUN) $(PY) -m eeval selfcheck 2>/dev/null || (cd embodied-eval-kit && $(RUN) $(PY) -m eeval selfcheck)
+	$(MAKE) -s test
+	$(MAKE) -s kit-test
+	@echo "✓ 结果表、架构图、语法、两套测试全部通过"
 
-## kit-demo    跑评测工具包的合成数据演示（零依赖，不需要 mujoco）
+## kit-demo    跑评测工具包的演示：真实 76 条 rollout + 合成对照（零依赖）
 kit-demo:
+	$(RUN) $(PY) embodied-eval-kit/examples/demo_real_run.py
 	$(RUN) $(PY) embodied-eval-kit/examples/demo_synthetic.py
 
 ## weights     重算语言通道权重曲线 → rl/eval/lang_weight_curve.json（需要 outputs 里的 ckpt）
@@ -118,4 +134,4 @@ clean:
 	rm -f rl/eval/demo_loop_r*.mp4
 	@echo "✓ 已清理（结果 json 与 ckpt 未动）"
 
-.PHONY: help tables check kit-demo weights compare-video assets demo demo-right demo-loop bc-compare eval train audit kit-sync publish clean
+.PHONY: help tables test kit-test svg check kit-demo weights compare-video assets demo demo-right demo-loop bc-compare eval train audit kit-sync publish clean

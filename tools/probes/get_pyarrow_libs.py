@@ -5,10 +5,10 @@
 pip 又因为 /usr/lib/python3.10 下有损坏的 .pyc 报 `bad marshal data`。所以直接抓 wheel 解压，
 用 PYTHONPATH 挂上去即可（pyarrow wheel 自带 libarrow，不需要编译）。
 
-    env -u PYTHONHOME -u PYTHONPATH /usr/bin/python3 tools/get_pyarrow_libs.py
-    PYTHONPATH=$PWD/.cache/pylibs env -u PYTHONHOME /usr/bin/python3 tools/fix_cam_labels.py
+    env -u PYTHONHOME -u PYTHONPATH /usr/bin/python3 tools/probes/get_pyarrow_libs.py
+    PYTHONPATH=$PWD/.cache/pylibs env -u PYTHONHOME /usr/bin/python3 tools/probes/fix_cam_labels.py
 
-只有 tools/fix_cam_labels.py 改 episodes parquet 那一步需要它；扫描与导出不需要。
+只有 tools/probes/fix_cam_labels.py 改 episodes parquet 那一步需要它；扫描与导出不需要。
 """
 import json, ssl, sys, urllib.request, zipfile
 from pathlib import Path

@@ -2,7 +2,7 @@
 """导出真机"环境相机"画面 20 张 + 仿真参考 3 张 + 拼图 + 索引 + 垫子统计。
 
 相机来源不再写死文件夹名：真机数据集的 env/wrist 两路曾经标签互换过（已于 2026-10-26 修正，
-见 tools/fix_cam_labels.py 与 docs/REAL_DATASET_CAMERA_AUDIT.md），所以这里按画面内容自动判定：
+见 tools/probes/fix_cam_labels.py 与 docs/REAL_DATASET_CAMERA_AUDIT.md），所以这里按画面内容自动判定：
     抽样 N 帧 -> 逐像素时序 std < 8 的像素占比 static%
     固定环境相机 33%~56%；装在夹爪上的腕部相机 1%~2%
 哪一路 static% 高就取哪一路，并在 index.txt 里记录实测值，避免以后再翻车。

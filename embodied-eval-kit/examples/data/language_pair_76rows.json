@@ -1,0 +1,623 @@
+{
+ "protocol": {
+  "instructions": [
+   "Put the medicine box into the left wooden box.",
+   "Put the medicine box into the right wooden box."
+  ],
+  "expected_box": {
+   "Put the medicine box into the left wooden box.": "target_box",
+   "Put the medicine box into the right wooden box.": "target_box_b"
+  }
+ },
+ "source": "ACT language-conditioned policy, 5000 steps, 19 held-out scenes x 2 seeds x 2 instructions",
+ "rows": [
+  {
+   "episode_id": 2400,
+   "seed": 0,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 310,
+   "wall_s": 6.5
+  },
+  {
+   "episode_id": 2400,
+   "seed": 0,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 442,
+   "wall_s": 12.8
+  },
+  {
+   "episode_id": 2400,
+   "seed": 1,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 320,
+   "wall_s": 18.9
+  },
+  {
+   "episode_id": 2400,
+   "seed": 1,
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "steps": 442,
+   "wall_s": 25.1
+  },
+  {
+   "episode_id": 2401,
+   "seed": 0,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 311,
+   "wall_s": 31.1
+  },
+  {
+   "episode_id": 2401,
+   "seed": 0,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 442,
+   "wall_s": 37.5
+  },
+  {
+   "episode_id": 2401,
+   "seed": 1,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 307,
+   "wall_s": 43.4
+  },
+  {
+   "episode_id": 2401,
+   "seed": 1,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 193,
+   "wall_s": 48.6
+  },
+  {
+   "episode_id": 2402,
+   "seed": 0,
+   "ix": 0,
+   "landed_box": null,
+   "steps": 211,
+   "wall_s": 54.2
+  },
+  {
+   "episode_id": 2402,
+   "seed": 0,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 241,
+   "wall_s": 59.8
+  },
+  {
+   "episode_id": 2402,
+   "seed": 1,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 317,
+   "wall_s": 65.8
+  },
+  {
+   "episode_id": 2402,
+   "seed": 1,
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "steps": 442,
+   "wall_s": 72.2
+  },
+  {
+   "episode_id": 2403,
+   "seed": 0,
+   "ix": 0,
+   "landed_box": null,
+   "steps": 153,
+   "wall_s": 77.3
+  },
+  {
+   "episode_id": 2403,
+   "seed": 0,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 153,
+   "wall_s": 82.5
+  },
+  {
+   "episode_id": 2403,
+   "seed": 1,
+   "ix": 0,
+   "landed_box": null,
+   "steps": 442,
+   "wall_s": 88.9
+  },
+  {
+   "episode_id": 2403,
+   "seed": 1,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 442,
+   "wall_s": 95.3
+  },
+  {
+   "episode_id": 2404,
+   "seed": 0,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 324,
+   "wall_s": 101.3
+  },
+  {
+   "episode_id": 2404,
+   "seed": 0,
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "steps": 442,
+   "wall_s": 107.9
+  },
+  {
+   "episode_id": 2404,
+   "seed": 1,
+   "ix": 0,
+   "landed_box": null,
+   "steps": 442,
+   "wall_s": 114.3
+  },
+  {
+   "episode_id": 2404,
+   "seed": 1,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 442,
+   "wall_s": 120.8
+  },
+  {
+   "episode_id": 2405,
+   "seed": 0,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 320,
+   "wall_s": 126.8
+  },
+  {
+   "episode_id": 2405,
+   "seed": 0,
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "steps": 442,
+   "wall_s": 133.3
+  },
+  {
+   "episode_id": 2405,
+   "seed": 1,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 330,
+   "wall_s": 139.4
+  },
+  {
+   "episode_id": 2405,
+   "seed": 1,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 148,
+   "wall_s": 144.5
+  },
+  {
+   "episode_id": 2406,
+   "seed": 0,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 302,
+   "wall_s": 150.5
+  },
+  {
+   "episode_id": 2406,
+   "seed": 0,
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "steps": 442,
+   "wall_s": 157.0
+  },
+  {
+   "episode_id": 2406,
+   "seed": 1,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 306,
+   "wall_s": 163.0
+  },
+  {
+   "episode_id": 2406,
+   "seed": 1,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 193,
+   "wall_s": 168.2
+  },
+  {
+   "episode_id": 2407,
+   "seed": 0,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 321,
+   "wall_s": 174.2
+  },
+  {
+   "episode_id": 2407,
+   "seed": 0,
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "steps": 442,
+   "wall_s": 180.6
+  },
+  {
+   "episode_id": 2407,
+   "seed": 1,
+   "ix": 0,
+   "landed_box": null,
+   "steps": 148,
+   "wall_s": 185.8
+  },
+  {
+   "episode_id": 2407,
+   "seed": 1,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 148,
+   "wall_s": 191.0
+  },
+  {
+   "episode_id": 2408,
+   "seed": 0,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 323,
+   "wall_s": 197.1
+  },
+  {
+   "episode_id": 2408,
+   "seed": 0,
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "steps": 442,
+   "wall_s": 203.6
+  },
+  {
+   "episode_id": 2408,
+   "seed": 1,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 327,
+   "wall_s": 209.7
+  },
+  {
+   "episode_id": 2408,
+   "seed": 1,
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "steps": 442,
+   "wall_s": 216.1
+  },
+  {
+   "episode_id": 2409,
+   "seed": 0,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 308,
+   "wall_s": 222.2
+  },
+  {
+   "episode_id": 2409,
+   "seed": 0,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 442,
+   "wall_s": 228.7
+  },
+  {
+   "episode_id": 2409,
+   "seed": 1,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 315,
+   "wall_s": 234.7
+  },
+  {
+   "episode_id": 2409,
+   "seed": 1,
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "steps": 442,
+   "wall_s": 241.2
+  },
+  {
+   "episode_id": 2411,
+   "seed": 0,
+   "ix": 0,
+   "landed_box": null,
+   "steps": 198,
+   "wall_s": 246.3
+  },
+  {
+   "episode_id": 2411,
+   "seed": 0,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 442,
+   "wall_s": 252.9
+  },
+  {
+   "episode_id": 2411,
+   "seed": 1,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 312,
+   "wall_s": 258.9
+  },
+  {
+   "episode_id": 2411,
+   "seed": 1,
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "steps": 442,
+   "wall_s": 265.4
+  },
+  {
+   "episode_id": 2412,
+   "seed": 0,
+   "ix": 0,
+   "landed_box": null,
+   "steps": 134,
+   "wall_s": 270.5
+  },
+  {
+   "episode_id": 2412,
+   "seed": 0,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 136,
+   "wall_s": 275.6
+  },
+  {
+   "episode_id": 2412,
+   "seed": 1,
+   "ix": 0,
+   "landed_box": null,
+   "steps": 442,
+   "wall_s": 282.1
+  },
+  {
+   "episode_id": 2412,
+   "seed": 1,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 442,
+   "wall_s": 288.5
+  },
+  {
+   "episode_id": 2413,
+   "seed": 0,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 303,
+   "wall_s": 294.5
+  },
+  {
+   "episode_id": 2413,
+   "seed": 0,
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "steps": 442,
+   "wall_s": 300.9
+  },
+  {
+   "episode_id": 2413,
+   "seed": 1,
+   "ix": 0,
+   "landed_box": null,
+   "steps": 205,
+   "wall_s": 306.5
+  },
+  {
+   "episode_id": 2413,
+   "seed": 1,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 152,
+   "wall_s": 311.7
+  },
+  {
+   "episode_id": 2414,
+   "seed": 0,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 296,
+   "wall_s": 317.3
+  },
+  {
+   "episode_id": 2414,
+   "seed": 0,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 295,
+   "wall_s": 322.9
+  },
+  {
+   "episode_id": 2414,
+   "seed": 1,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 333,
+   "wall_s": 329.0
+  },
+  {
+   "episode_id": 2414,
+   "seed": 1,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 209,
+   "wall_s": 334.6
+  },
+  {
+   "episode_id": 2415,
+   "seed": 0,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 320,
+   "wall_s": 340.7
+  },
+  {
+   "episode_id": 2415,
+   "seed": 0,
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "steps": 442,
+   "wall_s": 347.1
+  },
+  {
+   "episode_id": 2415,
+   "seed": 1,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 299,
+   "wall_s": 352.8
+  },
+  {
+   "episode_id": 2415,
+   "seed": 1,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 291,
+   "wall_s": 358.4
+  },
+  {
+   "episode_id": 2416,
+   "seed": 0,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 302,
+   "wall_s": 364.4
+  },
+  {
+   "episode_id": 2416,
+   "seed": 0,
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "steps": 442,
+   "wall_s": 370.9
+  },
+  {
+   "episode_id": 2416,
+   "seed": 1,
+   "ix": 0,
+   "landed_box": null,
+   "steps": 147,
+   "wall_s": 376.1
+  },
+  {
+   "episode_id": 2416,
+   "seed": 1,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 149,
+   "wall_s": 381.2
+  },
+  {
+   "episode_id": 2417,
+   "seed": 0,
+   "ix": 0,
+   "landed_box": null,
+   "steps": 154,
+   "wall_s": 386.4
+  },
+  {
+   "episode_id": 2417,
+   "seed": 0,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 153,
+   "wall_s": 391.5
+  },
+  {
+   "episode_id": 2417,
+   "seed": 1,
+   "ix": 0,
+   "landed_box": null,
+   "steps": 155,
+   "wall_s": 396.6
+  },
+  {
+   "episode_id": 2417,
+   "seed": 1,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 152,
+   "wall_s": 401.8
+  },
+  {
+   "episode_id": 2418,
+   "seed": 0,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 309,
+   "wall_s": 407.8
+  },
+  {
+   "episode_id": 2418,
+   "seed": 0,
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "steps": 442,
+   "wall_s": 414.3
+  },
+  {
+   "episode_id": 2418,
+   "seed": 1,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 316,
+   "wall_s": 420.3
+  },
+  {
+   "episode_id": 2418,
+   "seed": 1,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 442,
+   "wall_s": 426.8
+  },
+  {
+   "episode_id": 2419,
+   "seed": 0,
+   "ix": 0,
+   "landed_box": "target_box",
+   "steps": 319,
+   "wall_s": 432.9
+  },
+  {
+   "episode_id": 2419,
+   "seed": 0,
+   "ix": 1,
+   "landed_box": "target_box_b",
+   "steps": 442,
+   "wall_s": 439.3
+  },
+  {
+   "episode_id": 2419,
+   "seed": 1,
+   "ix": 0,
+   "landed_box": null,
+   "steps": 145,
+   "wall_s": 444.4
+  },
+  {
+   "episode_id": 2419,
+   "seed": 1,
+   "ix": 1,
+   "landed_box": null,
+   "steps": 145,
+   "wall_s": 449.6
+  }
+ ]
+}

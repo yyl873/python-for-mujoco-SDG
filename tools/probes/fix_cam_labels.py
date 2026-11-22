@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """修正真机数据集里 env / wrist 两路相机标签互换的问题。
 
-已确认的事实（2026-10-26，tools/scan_real_cams.py 逐文件测 + 用户目视确认）：
+已确认的事实（2026-10-26，tools/probes/scan_real_cams.py 逐文件测 + 用户目视确认）：
     *_fixed 三个数据集（real_train_fixed / yyl100_dataset_fixed / holdout_fixed）
     的 `observation.images.env` 里存的是随臂移动的腕部画面，
     `observation.images.wrist` 里存的才是固定环境相机画面 —— 与文件夹名相反。
@@ -18,11 +18,11 @@
 
 用法：
     # 只看计划（默认）
-    env -u PYTHONHOME -u PYTHONPATH .cache/venv/bin/python tools/fix_cam_labels.py
+    env -u PYTHONHOME -u PYTHONPATH .cache/venv/bin/python tools/probes/fix_cam_labels.py
     # 真正执行（需要写 ~/lerobot_datasets）
-    ... tools/fix_cam_labels.py --apply
+    ... tools/probes/fix_cam_labels.py --apply
     # 回滚
-    ... tools/fix_cam_labels.py --revert
+    ... tools/probes/fix_cam_labels.py --revert
 
 安全性：--apply 前会把 meta/info.json、meta/stats.json、meta/episodes/**/*.parquet 备份到
         数据集内的 .cam_fix_backup/<时间戳>/；并在数据集根写 .cam_label_fix.json 清单供 --revert 使用。
@@ -51,7 +51,7 @@ BACKUP = ".cam_fix_backup"
 def load_scan(csv_path: Path) -> dict[tuple[str, str], dict]:
     """-> {(dataset, stream): {unanimous, majority, files, static_med}}"""
     if not csv_path.exists():
-        raise SystemExit("缺少扫描结果 %s，先跑 tools/scan_real_cams.py" % csv_path)
+        raise SystemExit("缺少扫描结果 %s，先跑 tools/probes/scan_real_cams.py" % csv_path)
     per: dict[tuple[str, str], list[dict]] = {}
     with csv_path.open(encoding="utf-8") as fh:
         for r in csv.DictReader(fh):

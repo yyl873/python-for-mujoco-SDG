@@ -1,220 +1,81 @@
-# SO-ARM101 · 纯物理仿真 → 语言条件抓取放置（零 ROS）
+<img src="docs/assets/pipeline.svg" width="100%" alt="SO-ARM101 零 ROS 管线：场景 → IK → 真接触抓取与六项闸门 → 渲染与合成数据 → lerobot v3 → 语言条件 ACT → 反事实配对评测">
 
-一条**零 ROS**的纯 MuJoCo 管线：真物理抓取（不写 `qpos`）→ 批量合成数据 → lerobot 数据集 →
-**语言条件 ACT**（"放进左边 / 右边木箱"）→ **反事实配对评测**证明语言真的进了策略。
+# 纯 MuJoCo 仿真 → 语言条件抓取（零 ROS）
 
-两块可验证的成果：**① 仿真数据混合显著提升真机抓取成功率**（Fisher p=0.0028）、
-**② 配对数据让语言从"完全没用"变成"落箱即跟随 100%"**（配对全对 0/38 → 15/38）。
+逆运动学 → **真接触**抓取（不写 `qpos`）→ 批量合成数据 → lerobot v3 → 语言条件 ACT → **反事实配对评测**证明语言真的进了策略。仿真与数据链路不 `import rclpy`；真机侧的 ROS 2 隔离在 `real_robot/`。
 
-> 数字全部可由 `make tables` 从 `rl/eval/*.json` 重新生成 → [`docs/RESULTS.md`](docs/RESULTS.md)。
+## 三个数字
 
----
-
-## ① 真机：只差"训练数据里有没有仿真"一个变量的对照（每模型 12 次，pilot 规模）
-
-| 训练数据 | 抓取成功率 | 任务成功率 |
+| 指标 | 实测 | 口径与出处 |
 |---|---|---|
-| 纯真机 139 集 | 1/12 = 8.3% | 1/12 = 8.3% |
-| 真机 139 + 仿真 39 | 8/12 = 66.7% | 3/12 = 25.0% |
-| 上者 + 真机微调 3000 步 | **9/12 = 75.0%** | 5/12 = 41.7% |
+| **真机抓取成功率** | **8.3% → 66.7%**（1/12 → 8/12），两阶段微调后 **75.0%**（9/12） | 同场次、同 22500 步、同机器、同推理参数，只差训练数据 → Fisher **p = 0.0094**；微调后 vs 纯真机 **p = 0.0028**，n=12 pilot |
+| **手指穿模深度** | **0.02 mm** | 闸门 ≤1.6 mm；52/1968 个顶点越界。对照：换指垫前固定指壳在完全下探时穿进盒体 **22.6 mm**，那是"戳"不是"夹" |
+| **真实抬升** | **+122.2 mm**（水平搬运 218.1 mm） | 闸门 ≥50 mm；握持力来自 `mj_step` 接触（峰值 2.37 N，药盒重力 0.113 N），全程不写 `qpos` |
 
-- 抓取提升 **Fisher 精确检验 p=0.0028**（显著），两组 Wilson 95% 区间不重叠。
-- 任务成功率（p=0.155）与释放改善（p=0.637）**未达显著**，n=12 属 pilot —— 如实标注。
-- 详见 [`docs/REAL_AB_RESULTS_2026-10-28.md`](docs/REAL_AB_RESULTS_2026-10-28.md)、
-  根因链 [`docs/GRIPPER_RELEASE_DIAGNOSTIC.md`](docs/GRIPPER_RELEASE_DIAGNOSTIC.md)。
+语言侧同口径的三个数：[落对 **40/40 = 100%**（Wilson 下界 0.912）](docs/RESULTS.md)、**配对全对 15/38**、ITT **52.6%**；那 2 维语言通道的权重从 **0.00000** 训到 **0.06747**。
+对照：混叠数据的 v1 在同一评测里"看起来"有 **56.4%**，但它的**配对全对是 0/38**——因为数据里"指令"和"场景"共线，这个 56.4% 只是"总往右放"的副产品。把指令和场景解耦（同场景两条指令首帧 `qpos` 差 **0.000e+00**）之后，才有 15/38 这个真数字。
 
-## ② 语言条件：反事实配对评测（留出场景 × 2 seed × 2 指令 = 76 rollout）
+## 一次排障：65° 的腕部冲突
 
-| 模型 | 落点 A / B / 未落箱 | follow_acc | 配对全对 | 判定 |
-|---|---|---|---|---|
-| v1 双指令数据（指令按 episode 区间分配 → 与场景共线） | 1 / 38 / 37 | 56.4%* | **0 / 38** | 语言未被使用 |
-| **v2_pair 配对数据（同场景只换指令）** | 25 / 15 / 36 | **100%（40/40）** | **15 / 38** | **语言生效** |
+1. 真机换成带指垫的夹爪后，凡是"抓到了却放不掉"的 9 次，模型张开夹爪那一刻的 `wrist_flex` 均值停在 **≈39°**——真机数据是 **+63°**、仿真数据是 **−2°**，39° 是**两套数据里都不存在的位姿**。
+2. 根因：指垫把 TCP 往后推了 **11 mm**，IK 为了够到同一个点就把整个腕部转了 **≈65°**；本臂 lift / elbow / flex **三轴平行**，末端指向只由三者之和决定，所以"每关节差 65°"和"之和差 65.9°（真机 +63.4 / 仿真 −2.5）"是同一件事——这个位姿在仿真里合法，在真机上就是提歪盒子并按不出释放姿态。
+3. 先做排除法封死其它解释（带载张开 99.381 > 空载、张开量更大、关掉 temporal ensembling 无效、量程与标定正确），才敢说这是**两种指面配置**而不是闭环算错——所以修法是改指面或把指面位移写进 URDF，**不是继续调策略**。
 
-\* v1 的 56.4% 是假象：它只是"总往右放"，凡指令为右的都算对；**配对全对 0/38** 才是真相。
-关键变量是数据配对（`collect.py --scene-seed-offset`，同场景两条指令首帧 qpos 差 **0.000e+00**）。
+完整证据链：[`docs/GRIPPER_RELEASE_DIAGNOSTIC.md`](docs/GRIPPER_RELEASE_DIAGNOSTIC.md) §11（含"只去指垫只能解决一半冲突"的限制）。
 
-权重层旁证：语言 2 列（state dim 6/7）在基座里**恰好为 0**（6→8 补零），
-训练 5000 步后长到 **0.06747**（`per_col` 口径）；同口径下 v2_pair@1250 是 v1 的 **1.35×**。
+## 同一场景、同一初始状态，只改一个 one-hot
 
----
+上面一条是"放进左边木箱"，下面一条是"放进右边木箱"（每条画面 = 策略看到的两路相机 `env` + `wrist`）：
 
-## 四块能力的证据（面试官 30 秒版）
+![语言条件对比](docs/assets/compare_left_right.gif)
 
-| 方向 | 我做了什么 | 代码/文档在哪 | 关键数字 | 自评 |
-|---|---|---|---|---|
-| **ROS2** | 真机侧 bringup：URDF/xacro + MoveIt2 配置 + ros2_control + RViz，加一个 `SDGGenerator` 节点（订阅 `/joint_states`→驱动 MuJoCo→渲染快照→存数据），场景路径参数化、注册 console script | `real_robot/so_arm101_bringup/`（`urdf/ config/ launch/ rviz/ so_arm101_bringup/sdg_generator.py`） | 1 个可编译 ROS2 包 · 2 个 launch · 13 个网格 · 节点 302 行 | 中（能搭能跑，未做真机闭环评测） |
-| **IL / 行为克隆** | 全部自制数据管线 + ACT 微调 + **反事实配对评测**（同场景换指令判落点） | `rl/run_lang_train.sh`、`rl/eval_lang.py`、`docs/RESULTS.md` | 留出场景 **follow_acc 100%（40/40）**、配对全对 **15/38**、ITT **52.6%**；真机抓取 **8.3%→75%（Fisher p=0.0028）** | **强**（含判据设计与负结果把控） |
-| **RL** | 冻结 ACT 基座 + **残差 SAC**（3 套奖励 × 3 seed × 30k 步），配洁净判据做 A/B | `rl/env_residual.py`、`rl/train.py`、`rl/eval_ab.py`、`docs/REPORT_RESIDUAL_RL.md` | 旧口径 +5.6pp 是假象；**洁净口径 26.7%→13.3%**，根因=奖励被钻空子（穿透罚 −3 ≫ 抓取奖 +0.5） | 中（会做、**诚实判负**；缺正结果，未做 PPO/离线 RL） |
-| **VLA / 语言条件** | 语言经 state 第 6/7 维 one-hot 进策略；用**配对数据**打掉"指令与场景共线" | `collect/collect.py --scene-seed-offset`、`rl/probe_lang_weight.py` | 语言列权重 **0.00000→0.06747**；配对后落点从 **1:38 偏斜 → 25:15** | 中偏弱（接口对，但**不是自由文本理解**；`smolvla`/`π0` 已就绪待跑） |
+▶ 完整画质：[`docs/assets/compare_left_right.mp4`](docs/assets/compare_left_right.mp4)（960×794，1.8 MB）
 
-一句话：**ROS2 我会搭、IL 我做全套并做对了判据、RL 我做完了并诚实判负、VLA 我把语言真正接进了策略但只到 one-hot 这一级。**
-
-## 技能栈（自评 + 证据）
-
-| 能力 | 档位 | 证据 |
-|---|---|---|
-| 实验设计与评测（区间估计/显著检验/预注册判据/反事实配对） | ★★★ | `embodied-eval-kit/`（独立开源，CI 全绿）、`docs/RESULTS.md` |
-| 仿真与物理（MuJoCo、真接触、域随机化、SDG） | ★★★ | 六项接触闸门、`collect/`、`docs/PHYSICS_FACTS.md` |
-| 数据工程（合成数据 → lerobot v3 → 微调） | ★★★ | 92 条/41922 帧、28 条/12670 帧配对集 |
-| 稳定性工程（续跑/降档/看护/显卡闸门） | ★★☆ | 8 小时 CPU 训练零崩溃（`rl/run_lang_train.sh`） |
-| ROS2 工程（URDF/MoveIt2/ros2_control） | ★★☆ | `real_robot/` |
-| IL（ACT 全流程 + 消融工具） | ★★☆ | 会调会评；只做过 ACT，现代 BC（DP/VQ-BeT）待对照 |
-| RL（SAC 残差） | ★☆☆ | 一个负向但完整的结果；无 PPO/离线 RL |
-| VLA（语言条件） | ★☆☆ | one-hot 级已打通；文本编码器未做 |
-| 部署（量化/TRT/时延预算） | ☆☆☆ | 未做 |
-
-## 它长什么样（演示 / 视频对比）
-
-**同一场景（ep2400/seed1）、同一初始状态，只改一个 one-hot → 箱子落到不同侧。**
-上面一条是"放进左边"，下面一条是"放进右边"（每条画面 = 策略看到的两路相机 `env` + `wrist`）：
-
-![对比视频](docs/assets/compare_left_right.gif)
-
-▶ 完整画质对比视频：[`docs/assets/compare_left_right.mp4`](docs/assets/compare_left_right.mp4)（960×794，222 帧，1.7 MB）
-
-单独看单条：
-
-| 指令 = 左 | 指令 = 右 |
-|---|---|
-| ![left](docs/assets/demo_left_s1.gif) | ![right](docs/assets/demo_right_s1.gif) |
+## 30 秒验证（不需要 GPU、不需要显示器）
 
 ```bash
-make demo          # 左指令 → rl/eval/demo_left.mp4
-make demo-right    # 右指令 → rl/eval/demo_right.mp4
-make assets        # mp4 → 单条 GIF（docs/assets/）
-.venv-rl/bin/python tools/make_compare_video.py   # → 上下并置对比视频 + GIF
+make test        # 83 个测试：从 rl/eval/*.json 复算 README 里的每一个数字
+make kit-test    # 134 个测试：评测工具包的统计与反事实协议
+make tables      # 从 rl/eval/*.json 重新生成 docs/RESULTS.md（数字不许手抄）
+make demo        # 出一条演示视频（可加 --mic 用语音下指令）
 ```
 
-想用**说话**驱动（麦克风 → ASR → 指令 → 实时窗口/视频）：
+`make test` 里的每个断言都指向一个已入库的产物：`40/40`、`15/38`、`p=0.0028`、`p=0.0094` 不是写死的字符串，而是从 `rl/eval/*.json` 用 [`embodied-eval-kit`](embodied-eval-kit/README.md) 重算出来的结果——数字对不上，测试就红。
 
-```bash
-P=.venv-rl/bin/python
-CKPT=outputs/act_lang_pair/checkpoints/005000/pretrained_model
-env -u PYTHONHOME -u PYTHONPATH MUJOCO_GL=egl HF_ENDPOINT=https://hf-mirror.com WHISPER_MODEL=tiny \
-  $P rl/demo_lang_policy.py --ckpt $CKPT --mic --viewer --loop --realtime \
-  --episode 2400 --seed 1 --out rl/eval/demo_mic.mp4
-```
-语音三后端按序尝试（faster-whisper → vosk → 声纹标定），三者都不可用时**明确报错而不是瞎猜**。
-
----
-
-## 管线
+## 仓库结构
 
 ```
-ik/test_ik.py                 逆运动学（24 次迭代，残差 0.9 mm）
-      │
-grasp/test_grasp.py           真物理抓取探针（法向力 2.6~4 N，药盒重力仅 0.113 N）
-      │
-tools/probe_contact_audit.py  ★ 六项闸门：下探零接触 / 压盒 ≤0.3 mm / 倾角 ≤5° / 抬升 ≥50 mm / 指缝 / 穿模
-      │
-render/test_render.py         录轨迹 + 渲染 h264 + 15 项自检（render 阶段不写 ctrl、不调 mj_step）
-      │
-collect/collect.py            SDG 批量合成（--jobs 并行；--scene-seed-offset 造反事实配对）
-      │
-collect/export_lerobot.py     → lerobot v3.0 数据集（ACT / SmolVLA 直接训）
-      │
-rl/run_lang_train.sh          训练壳：断电续跑 / 4 档自动降档 / 显卡闸门（无卡显式失败）
-      │
-rl/run_lang_eval.sh           反事实评测：同场景两条指令各跑一遍，判"落点是否随指令变"
-      │
-tools/make_tables.py          结果表自动生成（README 的数字不许手抄）
+model/               MJCF 与 14 个网格（改模型只动这里）
+ik/ grasp/ render/ collect/   仿真四步：IK 24 次迭代内收敛 → 真接触抓取 → 六项闸门 → 渲染与合成数据
+rl/                  训练壳（断电续跑/降档/显卡闸门）、反事实评测、演示与语音链路
+real_robot/          真机侧 ROS 2 bringup（URDF + MoveIt2 + ros2_control + SDGGenerator 节点）——唯一碰 ROS 的地方
+embodied-eval-kit/   可独立发布的评测工具包：手写精确统计 + 反事实配对协议 + 三态回执（134 个测试，零依赖）
+tests/               仓库级 pytest：复算已发布数字、守 README 链接、守结果表新鲜度
+tools/               入口工具；tools/probes/ 是一次性排障脚本（保留为可复现证据）
+docs/                6 份文档 + 自动生成的 RESULTS.md（索引见 docs/README.md）
 ```
 
----
+## 诚实的边界
 
-## 快速开始（以下都不需要 GPU）
-
-```bash
-make help      # 所有目标
-make tables    # 从 rl/eval/*.json 重新生成 docs/RESULTS.md（不重跑实验）
-make check     # 自检：结果表是否最新、json 字段是否齐、脚本能否编译
-make demo      # 出一条演示视频
-make audit     # 接触真实性审计（0.5 s/条，纯内存）
-make eval      # 重跑 76 条反事实评测（CPU 8~15 分钟）
-make train     # 5000 步训练（CPU ≈7.7 h / GPU ≈30 min）—— 不会自动跑
-```
-
-环境（本机踩过的坑，不设会直接失败）：
-
-```bash
-env -u PYTHONHOME -u PYTHONPATH <python>   # 否则报 No module named 'encodings'
-export MUJOCO_GL=egl                       # 渲染只认 egl（glfw/osmesa 都会崩）
-```
-
-版本：Python 3.10（工具）/ 3.12（训练，lerobot 0.6.2）· mujoco 3.16.0 · torch 2.7.1 · opencv 4.5.4
-
----
-
-## 三条硬约束（违反即返工）
-
-1. **零 ROS**：不引入 `rclpy`/`moveit`；`old_ros/` 只作参考，禁止运行。
-2. **不伪造抓取**：不写 `data.qpos` 把药盒"焊"在夹爪上；握持只能来自 `mj_step` 的接触力与摩擦。
-3. **渲染与控制解耦**：render 阶段不写 `ctrl`、不调 `mj_step`，只对已录轨迹做 `mj_forward` 回放。
-
----
-
-## 仓库地图
-
-```
-model/            MJCF 与 14 个网格（改模型只动这里）
-ik/ grasp/ render/ collect/     仿真四步 + 自检
-rl/               训练 / 评测 / 演示 / 探针（run_lang_train.sh、eval_lang.py、demo_lang_policy.py…）
-real_robot/       真机侧 ROS2 bringup 包（URDF + MoveIt2 + ros2_control + sdg_generator 节点）——唯一碰 ROS 的地方
-embodied-eval-kit/ 可独立发布的评测工具包（零依赖：Wilson / Fisher / McNemar / 洁净判据 / 反事实聚合）
-tools/            执行器与探针（流水线、接触审计、结果表生成、策略回放）
-docs/             只留 6 份（见 docs/README.md：结果表 / 本轮报告 / RL 负结果 / 真机 A/B / 操作手册 / 物理事实）
-logs/             运行日志与断点档案
-```
-
-**不入库**（`.gitignore`，均可由代码重生成）：`outputs/`（ckpt，591 MB/档）、`videos/`、`dataset/`、
-`rl/lang_ds/`（1.3 GB 数据集）、`scripts/`（SDG 母本）、`inspect/`。
-
----
-
-## 我做了什么 / 站在谁的肩膀上
-
-**我的**：真物理 SDG 管线与六项接触闸门 · 反事实配对采集（`--scene-seed-offset`）·
-反事实评测与预注册判据（Wilson / 二项检验 / ITT 双口径）· 语言通道权重曲线工具 ·
-训练壳硬化（断电续跑、4 档降档、显卡闸门）· 演示与语音链路 · 残差 RL 的负结果分析。
-
-**第三方**：[lerobot](https://github.com/huggingface/lerobot)（数据格式与 ACT/SmolVLA 实现）、
-SO-ARM101 本体模型。**策略实现不是我写的**，我写的是数据、评测、工程与结论。
-真机 bringup 包 `real_robot/so_arm101_bringup/` 为 Apache-2.0，保留原 LICENSE。
-
----
-
-## 边界（不许越界引用）
-
-- `follow_acc 100%` 的分母是 **40 条落进箱子**的 rollout；含失败的口径是 **ITT 52.6%**。
-- 评测是 **19 个留出场景 × 2 seed**，不是全场景空间；**单 seed 单次评测**，提升幅度不宜当稳定效应。
-- 真机 A/B 是 **n=12 的 pilot**：抓取显著（p=0.0028），任务成功率**未达显著**。
-- 语言是 **2 维 one-hot（左/右）**，不是自由文本理解；换说法不支持。
-- 语言条件策略**只在仿真里评测过**，尚未在真机做闭环评测。
-- 红线 #1「零 ROS」只约束**仿真与数据链路**；真机侧 ROS2 代码隔离在 `real_robot/`（见其 README）。
-
----
-
-## 已知问题 / 下一步
-
-1. **47% 的 rollout 没落进任何箱子**（11 条超时 + 25 条提前脱手；13/38 场景两条都失败）
-   → 瓶颈在抓取搬运质量，不是语言通道。
-2. **缺现代 BC 对比**：`diffusion` / `vqbet` 在 lerobot 0.6.2 里现成，尚未跑对照。
-3. **缺消融**：chunk_size / use_vae / temporal_ensemble_coeff 三个旋钮未做对照（排障字典）。
-4. **文本指令版**（one-hot → SmolVLA 文本条件）：数据集已带 `task` 字段，只差改评测脚本。
-5. **真机闭环**：语言条件策略尚未在真机跑 20 次评测。
-
----
+- `follow_acc 100%` 的分母是 **40 条落进箱子的 rollout**；含失败的口径是 **ITT 52.6%**（40/76）。两个数必须一起看。
+- 语言是 **2 维 one-hot（左/右）**，**不是自由文本理解**，换说法不支持；策略**只在仿真里评测过**，没做真机闭环。
+- 真机 A/B 是 **n=12 的 pilot**：抓取显著（p = 0.0094 / 0.0028），**任务成功率 p = 0.155 未达显著**。
+- 我做错过一次结论：先用一个数据量/步数都不对齐的对照得出"仿真无增益"，被同场次同步数的干净对照推翻。两次修正都留在 [`docs/REAL_AB_RESULTS_2026-10-28.md`](docs/REAL_AB_RESULTS_2026-10-28.md) §9–§10 里。
+- 残差 RL **是负结果**：洁净口径 26.7% → 13.3%，根因是奖励被钻空子（穿透罚 −3 ≫ 抓取奖 +0.5）。如实判负，见 [`docs/REPORT_RESIDUAL_RL.md`](docs/REPORT_RESIDUAL_RL.md)。
+- 缺项：现代 BC 对照（DP / VQ-BeT 只差跑一次）、chunk_size 等消融、文本指令版、真机闭环。
 
 ## 文档
 
 | 文档 | 给谁看 |
 |---|---|
-| [`docs/RESULTS.md`](docs/RESULTS.md) | **自动生成**的结果三表（语言 / 权重曲线 / 残差 RL） |
+| [`docs/RESULTS.md`](docs/RESULTS.md) | **自动生成**的三张结果表 |
 | [`docs/ROUND_lang_pair_5000.md`](docs/ROUND_lang_pair_5000.md) | 语言条件这一轮的完整报告（口径 / 失败拆解 / 边界） |
-| [`docs/REPORT_RESIDUAL_RL.md`](docs/REPORT_RESIDUAL_RL.md) | 残差 SAC 的负结果与根因（奖励被钻空子） |
-| [`docs/RUNBOOK_SDG.md`](docs/RUNBOOK_SDG.md) | 操作手册：怎么刷数据、怎么导出、1000 条怎么跑 |
-| [`docs/PHYSICS_FACTS.md`](docs/PHYSICS_FACTS.md) | 生效的物理事实与不可动参数 |
+| [`docs/GRIPPER_RELEASE_DIAGNOSTIC.md`](docs/GRIPPER_RELEASE_DIAGNOSTIC.md) | 释放失败的根因链（就是上面那个 65°） |
+| [`docs/PHYSICS_FACTS.md`](docs/PHYSICS_FACTS.md) | 生效的物理事实、六项闸门实测值、不许动的参数 |
+| [`docs/RUNBOOK_SDG.md`](docs/RUNBOOK_SDG.md) | 操作手册：刷数据、导出、跑 1000 条 |
+| [`docs/REPORT_RESIDUAL_RL.md`](docs/REPORT_RESIDUAL_RL.md) | 残差 SAC 的负结果与根因 |
+| [`tools/probes/README.md`](tools/probes/README.md) | 一次性排障脚本各自回答过什么问题 |
 
-## License
+策略实现不是我写的：[lerobot](https://github.com/huggingface/lerobot) 提供 ACT / SmolVLA 与数据格式，[SO-ARM101](https://github.com/TheRobotStudio/SO-ARM100) 提供本体模型。我写的是**仿真、数据、评测与结论**。真机 bringup 包保留 Apache-2.0 许可。
 
 MIT（`model/` 内网格素材与第三方库遵循各自许可）。

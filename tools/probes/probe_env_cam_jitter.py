@@ -8,7 +8,7 @@
 
 用法：
     env -u PYTHONHOME -u PYTHONPATH MUJOCO_GL=egl \
-        /usr/bin/python3 tools/probe_env_cam_jitter.py [--n 12] [--seed0 1000]
+        /usr/bin/python3 tools/probes/probe_env_cam_jitter.py [--n 12] [--seed0 1000]
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]   # tools/probes/<this> -> 仓库根
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "collect"))
 

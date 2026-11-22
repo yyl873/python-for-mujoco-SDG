@@ -1,70 +1,199 @@
-"""把"成功"拆成可数的几条判据（洁净口径），而不是一句"抬起来就算成功"。
+"""Turn "the grasp succeeded" into a handful of countable gates.
 
-背景（本仓库实测）：只看"最终抬升 ≥50 mm"，会奖励"把盒子压得更深再抬起来"这种作弊策略；
-加上"不歪盒 + 不穿透"之后，同一个模型从 32.2% 掉到 13.3%。判据严格度直接决定结论正负。
+Why this module exists
+----------------------
+Scoring a rollout as "the box went up 50 mm" rewards a policy that squashes the box
+deeper into the table and then lifts: the lift trace looks great while the physical
+interaction is garbage.  In this project that exact reward hole moved a residual-RL
+policy from 32.2% to 13.3% once tilt and penetration were added to the criteria.
+
+So a verdict here is a *vector* of gates, each with its own threshold, and the returned
+dictionary always lists **every** failed gate rather than the first one.  A failure
+distribution ("9 of 12 rollouts died on penetration") says far more than a success rate.
+
+The judge is deliberately independent of the aggregator in :mod:`eeval.counterfactual`:
+this module answers "was this single rollout a clean success?", the other answers "does
+the policy use the instruction?".  Swapping in your own gates does not touch the stats.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import math
+from dataclasses import asdict, dataclass, field
+from typing import Iterable, Sequence
+
+__all__ = ["CleanCfg", "Episode", "GateResult", "judge_episode", "judge_many"]
+
+# Cheat patterns that a naive success criterion would reward.
+CHEAT_LIFT_THEN_DIG = "lifted only after digging into the object"
+CHEAT_INSTANT_LIFT = "lift peaked but was never held"
+CHEAT_TILTED_GRASP = "held at an angle"
 
 
-@dataclass
+@dataclass(frozen=True)
 class CleanCfg:
-    """洁净判据的阈值。全部用毫米/度，和仿真里的量纲一致。"""
-    lift_min_mm: float = 50.0          # 至少抬这么高
-    lift_consecutive: int = 5          # 而且要连续保持这么多步（防"瞬间弹起")
-    tilt_max_deg: float = 5.0          # 夹稳期间最大倾角
-    penetration_max_mm: float = 0.5    # 最大穿模深度
-    require_release: bool = False      # 是否要求成功放进箱子（有些任务只要抓取）
+    """Thresholds for the clean-success criteria (millimetres and degrees)."""
+
+    lift_min_mm: float = 50.0
+    lift_consecutive: int = 5
+    tilt_max_deg: float = 5.0
+    penetration_max_mm: float = 0.5
+    require_release: bool = False
+
+    def __post_init__(self) -> None:
+        if self.lift_min_mm < 0 or self.tilt_max_deg < 0 or self.penetration_max_mm < 0:
+            raise ValueError("thresholds must be non-negative")
+        if self.lift_consecutive < 1:
+            raise ValueError(f"lift_consecutive must be >= 1, got {self.lift_consecutive}")
+
+
+@dataclass(frozen=True)
+class GateResult:
+    """One criterion, evaluated."""
+
+    name: str
+    passed: bool
+    observed: float
+    threshold: float
+    kind: str  # "min" (must reach) or "max" (must stay below)
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+    def describe(self) -> str:
+        arrow = ">=" if self.kind == "min" else "<="
+        return f"{self.name}: {self.observed:.3f} {arrow} {self.threshold}"
 
 
 @dataclass
 class Episode:
-    """一条 rollout 的最小轨迹记录（长度相同的三个序列）。"""
-    lift_mm: list[float] = field(default_factory=list)       # 每步盒子相对初始的抬升
-    tilt_deg: list[float] = field(default_factory=list)      # 每步盒子倾角
-    penetration_mm: list[float] = field(default_factory=list)  # 每步穿模深度
-    landed_box: str | None = None                            # 最终落进哪个箱子（无则 None）
+    """One rollout's physical traces, sampled at the same rate and the same length."""
+
+    lift_mm: Sequence[float] = field(default_factory=list)
+    tilt_deg: Sequence[float] = field(default_factory=list)
+    penetration_mm: Sequence[float] = field(default_factory=list)
+    landed_box: str | None = None
+    episode_id: int | None = None
+
+    def __post_init__(self) -> None:
+        lengths = {len(self.lift_mm), len(self.tilt_deg), len(self.penetration_mm)}
+        non_empty = {length for length in lengths if length}
+        if len(non_empty) > 1:
+            raise ValueError(
+                f"traces must have the same length, got lift={len(self.lift_mm)}, "
+                f"tilt={len(self.tilt_deg)}, penetration={len(self.penetration_mm)}"
+            )
+        for name in ("lift_mm", "tilt_deg", "penetration_mm"):
+            for value in getattr(self, name):
+                if not math.isfinite(value):
+                    raise ValueError(f"{name} contains a non-finite value: {value!r}")
 
 
-def judge_episode(ep: Episode, cfg: CleanCfg | None = None) -> dict:
-    """返回 {ok, reasons, max_lift_mm, max_tilt_deg, max_penetration_mm, consecutive_ok}。
+def _longest_run(values: Sequence[float], minimum: float) -> int:
+    best = current = 0
+    for value in values:
+        current = current + 1 if value >= minimum else 0
+        best = max(best, current)
+    return best
 
-    `reasons` 会列出**所有**不满足的条件，方便按失败类型计数（失败分布比成功率更有信息量）。
+
+def judge_episode(episode: Episode, cfg: CleanCfg | None = None) -> dict:
+    """Evaluate every gate; return the verdict plus the raw extremes.
+
+    The returned dict keeps the historical keys (``ok``, ``reasons``, ``max_lift_mm``,
+    ``max_tilt_deg``, ``max_penetration_mm``, ``consecutive_ok``) and adds ``gates``
+    (per-criterion detail) and ``cheat_flags``.
     """
     cfg = cfg or CleanCfg()
-    lift = ep.lift_mm or [0.0]
-    tilt = ep.tilt_deg or [0.0]
-    pen = ep.penetration_mm or [0.0]
+    lift = list(episode.lift_mm) or [0.0]
+    tilt = list(episode.tilt_deg) or [0.0]
+    penetration = list(episode.penetration_mm) or [0.0]
 
     max_lift = max(lift)
     max_tilt = max(tilt)
-    max_pen = max(pen)
+    max_penetration = max(penetration)
+    longest_run = _longest_run(lift, cfg.lift_min_mm)
 
-    # 连续抬升：找最长的一段连续达标
-    best = cur = 0
-    for z in lift:
-        cur = cur + 1 if z >= cfg.lift_min_mm else 0
-        best = max(best, cur)
-    consecutive_ok = best >= cfg.lift_consecutive
+    gates = [
+        GateResult("max_lift_mm", max_lift >= cfg.lift_min_mm, max_lift, cfg.lift_min_mm, "min"),
+        GateResult(
+            "lift_consecutive",
+            longest_run >= cfg.lift_consecutive,
+            float(longest_run),
+            float(cfg.lift_consecutive),
+            "min",
+        ),
+        GateResult("max_tilt_deg", max_tilt <= cfg.tilt_max_deg, max_tilt, cfg.tilt_max_deg, "max"),
+        GateResult(
+            "max_penetration_mm",
+            max_penetration <= cfg.penetration_max_mm,
+            max_penetration,
+            cfg.penetration_max_mm,
+            "max",
+        ),
+    ]
+    if cfg.require_release:
+        gates.append(
+            GateResult(
+                "landed_in_box",
+                1.0 if episode.landed_box else 0.0,
+                1.0 if episode.landed_box else 0.0,
+                1.0,
+                "min",
+            )
+        )
 
-    reasons: list[str] = []
-    if max_lift < cfg.lift_min_mm:
-        reasons.append(f"lift<{cfg.lift_min_mm}mm(max={max_lift:.2f})")
-    if not consecutive_ok:
-        reasons.append(f"连续抬升不足{cfg.lift_consecutive}步(最长{best})")
+    failed = [gate for gate in gates if not gate.passed]
+    cheat_flags: list[str] = []
+    if max_lift >= cfg.lift_min_mm and max_penetration > cfg.penetration_max_mm:
+        cheat_flags.append(CHEAT_LIFT_THEN_DIG)
+    if max_lift >= cfg.lift_min_mm and longest_run < cfg.lift_consecutive:
+        cheat_flags.append(CHEAT_INSTANT_LIFT)
     if max_tilt > cfg.tilt_max_deg:
-        reasons.append(f"tilt>{cfg.tilt_max_deg}deg(max={max_tilt:.2f})")
-    if max_pen > cfg.penetration_max_mm:
-        reasons.append(f"穿透>{cfg.penetration_max_mm}mm(max={max_pen:.2f})")
-    if cfg.require_release and ep.landed_box is None:
-        reasons.append("未落入目标箱")
+        cheat_flags.append(CHEAT_TILTED_GRASP)
 
     return {
-        "ok": not reasons,
-        "reasons": reasons,
+        "ok": not failed,
+        "reasons": [gate.describe() for gate in failed],
+        "failed_gates": [gate.name for gate in failed],
+        "gates": [gate.as_dict() for gate in gates],
+        "cheat_flags": cheat_flags,
         "max_lift_mm": round(max_lift, 3),
         "max_tilt_deg": round(max_tilt, 3),
-        "max_penetration_mm": round(max_pen, 3),
-        "consecutive_ok": consecutive_ok,
+        "max_penetration_mm": round(max_penetration, 3),
+        "consecutive_ok": longest_run >= cfg.lift_consecutive,
+        "lift_consecutive_max": longest_run,
+        "landed_box": episode.landed_box,
+        "n_samples": len(lift),
+    }
+
+
+def judge_many(episodes: Iterable[Episode], cfg: CleanCfg | None = None) -> dict:
+    """Judge a batch and summarise *why* the failures failed.
+
+    Returns ``{"n", "n_ok", "success_rate", "by_gate": {...}, "by_cheat": {...},
+    "per_episode": [...]}``; ``by_gate`` counts how many episodes failed each criterion,
+    which is the number to look at before touching a policy.
+    """
+    cfg = cfg or CleanCfg()
+    verdicts = [judge_episode(episode, cfg) for episode in episodes]
+    by_gate: dict[str, int] = {gate: 0 for gate in ("max_lift_mm", "lift_consecutive",
+                                                    "max_tilt_deg", "max_penetration_mm")}
+    if cfg.require_release:
+        by_gate["landed_in_box"] = 0
+    by_cheat: dict[str, int] = {}
+    for verdict in verdicts:
+        for gate in verdict["failed_gates"]:
+            by_gate[gate] = by_gate.get(gate, 0) + 1
+        for flag in verdict["cheat_flags"]:
+            by_cheat[flag] = by_cheat.get(flag, 0) + 1
+    n = len(verdicts)
+    n_ok = sum(1 for verdict in verdicts if verdict["ok"])
+    return {
+        "n": n,
+        "n_ok": n_ok,
+        "success_rate": round(n_ok / n, 4) if n else None,
+        "by_gate": by_gate,
+        "by_cheat": by_cheat,
+        "per_episode": verdicts,
     }

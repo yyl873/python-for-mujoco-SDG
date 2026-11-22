@@ -13,7 +13,7 @@
 用法：
   env -u PYTHONHOME -u PYTHONPATH \
     /home/yyl/miniforge3/envs/lerobot312/bin/python \
-    tools/eval_act_holdout.py \
+    tools/probes/eval_act_holdout.py \
       --ckpt /home/yyl/lerobot/outputs/train/act_armB/checkpoints/022500/pretrained_model \
       --out logs/eval_holdout_armB.json
 """

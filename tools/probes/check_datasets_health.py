@@ -15,7 +15,7 @@
 用法
 ----
   env -u PYTHONHOME -u PYTHONPATH /home/yyl/miniforge3/envs/lerobot312/bin/python \
-      tools/check_datasets_health.py --root <数据集根> [--root ...] \
+      tools/probes/check_datasets_health.py --root <数据集根> [--root ...] \
       [--out logs/dataset_health.json] [--sample-every 45] [--no-video]
 """
 from __future__ import annotations

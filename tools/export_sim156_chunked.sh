@@ -144,7 +144,7 @@ merge_all() {
         || die "merge 失败"
     echo "✅ merge 完成: $FINAL"
     echo "   下一步体检："
-    echo "   $PY $ROOT/tools/check_datasets_health.py --root $FINAL --out $ROOT/logs/health_sim156.json"
+    echo "   $PY $ROOT/tools/probes/check_datasets_health.py --root $FINAL --out $ROOT/logs/health_sim156.json"
 }
 
 ensure_episodes() {

@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1030" viewBox="0 0 1440 1030" role="img" aria-label="SO-ARM101 zero-ROS MuJoCo pipeline architecture">
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8895a4"/></marker>
+</defs>
+<rect width="1440" height="1030" fill="#ffffff"/>
+<text x="40" y="46" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="21" fill="#12181f" font-weight="700" text-anchor="start">SO-ARM101 · language-conditioned grasping, zero ROS</text>
+<text x="40" y="70" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#5b6b7c" font-weight="400" text-anchor="start">Each numbered box is a stage in this repository; each number is regenerated from the artifacts by make tables.</text>
+<line x1="40" y1="84" x2="1400" y2="84" stroke="#cdd8e4" stroke-width="1.2"/>
+<rect x="40" y="104" width="664" height="104" rx="10" fill="#f8fafc" stroke="#cdd8e4" stroke-width="1.2"/>
+<circle cx="69.0" cy="131.0" r="13" fill="#0b5cad"/>
+<text x="69" y="135.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#ffffff" font-weight="700" text-anchor="middle">1</text>
+<text x="92" y="131" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#12181f" font-weight="650" text-anchor="start">Scene</text>
+<text x="92" y="153" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" fill="#0b5cad" font-weight="400" text-anchor="start">model/scene.xml · SO-ARM101 + two target boxes</text>
+<text x="92" y="175" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">6 randomized dimensions: box pose, grasp jitter, timing, camera, sensor, visuals</text>
+<text x="92" y="192" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">data set sdg-v7</text>
+<rect x="40" y="238" width="664" height="104" rx="10" fill="#f8fafc" stroke="#cdd8e4" stroke-width="1.2"/>
+<circle cx="69.0" cy="265.0" r="13" fill="#0b5cad"/>
+<text x="69" y="269.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#ffffff" font-weight="700" text-anchor="middle">2</text>
+<text x="92" y="265" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#12181f" font-weight="650" text-anchor="start">Inverse kinematics</text>
+<text x="92" y="287" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" fill="#0b5cad" font-weight="400" text-anchor="start">ik/test_ik.py</text>
+<text x="92" y="309" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">24 iterations, end-effector residual 0.92 mm   (gate: below 2 mm)</text>
+<line x1="372.0" y1="210" x2="372.0" y2="231" stroke="#8895a4" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="40" y="372" width="664" height="104" rx="10" fill="#f8fafc" stroke="#cdd8e4" stroke-width="1.2"/>
+<circle cx="69.0" cy="399.0" r="13" fill="#0b5cad"/>
+<text x="69" y="403.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#ffffff" font-weight="700" text-anchor="middle">3</text>
+<text x="92" y="399" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#12181f" font-weight="650" text-anchor="start">True-contact grasp + 6-gate audit</text>
+<text x="92" y="421" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" fill="#0b5cad" font-weight="400" text-anchor="start">grasp/test_grasp.py → tools/probe_contact_audit.py</text>
+<text x="92" y="443" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">grip force comes from mj_step, never from writing qpos</text>
+<text x="92" y="460" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">penetration 0.02 mm · lift +122.2 mm · descend-segment contact 0/400</text>
+<line x1="372.0" y1="344" x2="372.0" y2="365" stroke="#8895a4" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="40" y="506" width="664" height="104" rx="10" fill="#f8fafc" stroke="#cdd8e4" stroke-width="1.2"/>
+<circle cx="69.0" cy="533.0" r="13" fill="#0b5cad"/>
+<text x="69" y="537.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#ffffff" font-weight="700" text-anchor="middle">4</text>
+<text x="92" y="533" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#12181f" font-weight="650" text-anchor="start">Render → batch SDG → lerobot v3</text>
+<text x="92" y="555" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" fill="#0b5cad" font-weight="400" text-anchor="start">render/test_render.py → collect/collect.py → collect/export_lerobot.py</text>
+<text x="92" y="577" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">15/15 render checks; the renderer never steps physics</text>
+<text x="92" y="594" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">92 episodes / 41,922 frames   ·   paired set: 28 episodes / 12,670 frames</text>
+<line x1="372.0" y1="478" x2="372.0" y2="499" stroke="#8895a4" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="40" y="640" width="664" height="104" rx="10" fill="#f8fafc" stroke="#cdd8e4" stroke-width="1.2"/>
+<circle cx="69.0" cy="667.0" r="13" fill="#0b5cad"/>
+<text x="69" y="671.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#ffffff" font-weight="700" text-anchor="middle">5</text>
+<text x="92" y="667" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#12181f" font-weight="650" text-anchor="start">Language-conditioned ACT</text>
+<text x="92" y="689" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" fill="#0b5cad" font-weight="400" text-anchor="start">rl/run_lang_train.sh</text>
+<text x="92" y="711" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">instruction = 2-dim one-hot on observation.state[6:8]</text>
+<text x="92" y="728" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">5,000 steps, 20 checkpoints, resumes after a power cut</text>
+<line x1="372.0" y1="612" x2="372.0" y2="633" stroke="#8895a4" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="40" y="774" width="664" height="104" rx="10" fill="#f8fafc" stroke="#cdd8e4" stroke-width="1.2"/>
+<circle cx="69.0" cy="801.0" r="13" fill="#0b5cad"/>
+<text x="69" y="805.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#ffffff" font-weight="700" text-anchor="middle">6</text>
+<text x="92" y="801" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#12181f" font-weight="650" text-anchor="start">Counterfactual evaluation</text>
+<text x="92" y="823" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" fill="#0b5cad" font-weight="400" text-anchor="start">rl/run_lang_eval.sh</text>
+<text x="92" y="845" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">19 held-out scenes × 2 seeds × 2 instructions = 76 rollouts</text>
+<text x="92" y="862" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">same scene, same seed: only the instruction changes</text>
+<line x1="372.0" y1="746" x2="372.0" y2="767" stroke="#8895a4" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="40" y="896" width="664" height="88" rx="10" fill="#fffdf5" stroke="#e5d9b5" stroke-width="1.2"/>
+<text x="58" y="920" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#12181f" font-weight="650" text-anchor="start">real_robot/so_arm101_bringup — the only place ROS 2 is allowed</text>
+<text x="58" y="942" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">URDF/xacro + MoveIt2 + ros2_control + an SDGGenerator node.</text>
+<text x="58" y="960" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">The physical A/B (12 trials per model) ran through it. The zero-ROS rule covers the</text>
+<text x="58" y="976" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">simulation and data chain, which never imports rclpy.</text>
+<rect x="740" y="104" width="660" height="274" rx="10" fill="#f8fafc" stroke="#cdd8e4" stroke-width="1.2"/>
+<text x="760" y="132" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#12181f" font-weight="650" text-anchor="start">The language channel is measurable</text>
+<text x="760" y="158" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" fill="#5b6b7c" font-weight="400" text-anchor="start">The instruction is a 2-dim one-hot appended to observation.state (dims 6 and 7).</text>
+<text x="760" y="176" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" fill="#5b6b7c" font-weight="400" text-anchor="start">The ACT checkpoint starts with those two columns zero-padded (6 → 8 dims).</text>
+<text x="760" y="194" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" fill="#5b6b7c" font-weight="400" text-anchor="start">Training moves their weight from 0.00000 to 0.06747 (per-column L2 of the encoder).</text>
+<line x1="806" y1="316.0" x2="1330" y2="316.0" stroke="#e6ecf3" stroke-width="1"/>
+<text x="796" y="320.0" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="10" fill="#8895a4" font-weight="400" text-anchor="end">0.00</text>
+<line x1="806" y1="266.0" x2="1330" y2="266.0" stroke="#e6ecf3" stroke-width="1"/>
+<text x="796" y="270.0" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="10" fill="#8895a4" font-weight="400" text-anchor="end">0.04</text>
+<line x1="806" y1="216.0" x2="1330" y2="216.0" stroke="#e6ecf3" stroke-width="1"/>
+<text x="796" y="220.0" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="10" fill="#8895a4" font-weight="400" text-anchor="end">0.07</text>
+<polyline points="806.0,316.0 832.2,311.0 858.4,305.9 884.6,301.1 910.8,295.7 937.0,290.5 963.2,284.3 989.4,279.2 1015.6,272.6 1041.8,266.1 1068.0,258.9 1094.2,250.6 1120.4,240.6 1146.6,232.3 1172.8,228.3 1199.0,226.1 1225.2,224.4 1251.4,222.9 1277.6,221.8 1303.8,220.3 1330.0,219.8" fill="none" stroke="#0b5cad" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="806.0" cy="316.0" r="2.6" fill="#0b5cad"/>
+<circle cx="832.2" cy="311.0" r="2.6" fill="#0b5cad"/>
+<circle cx="858.4" cy="305.9" r="2.6" fill="#0b5cad"/>
+<circle cx="884.6" cy="301.1" r="2.6" fill="#0b5cad"/>
+<circle cx="910.8" cy="295.7" r="2.6" fill="#0b5cad"/>
+<circle cx="937.0" cy="290.5" r="2.6" fill="#0b5cad"/>
+<circle cx="963.2" cy="284.3" r="2.6" fill="#0b5cad"/>
+<circle cx="989.4" cy="279.2" r="2.6" fill="#0b5cad"/>
+<circle cx="1015.6" cy="272.6" r="2.6" fill="#0b5cad"/>
+<circle cx="1041.8" cy="266.1" r="2.6" fill="#0b5cad"/>
+<circle cx="1068.0" cy="258.9" r="2.6" fill="#0b5cad"/>
+<circle cx="1094.2" cy="250.6" r="2.6" fill="#0b5cad"/>
+<circle cx="1120.4" cy="240.6" r="2.6" fill="#0b5cad"/>
+<circle cx="1146.6" cy="232.3" r="2.6" fill="#0b5cad"/>
+<circle cx="1172.8" cy="228.3" r="2.6" fill="#0b5cad"/>
+<circle cx="1199.0" cy="226.1" r="2.6" fill="#0b5cad"/>
+<circle cx="1225.2" cy="224.4" r="2.6" fill="#0b5cad"/>
+<circle cx="1251.4" cy="222.9" r="2.6" fill="#0b5cad"/>
+<circle cx="1277.6" cy="221.8" r="2.6" fill="#0b5cad"/>
+<circle cx="1303.8" cy="220.3" r="2.6" fill="#0b5cad"/>
+<circle cx="1330.0" cy="219.8" r="2.6" fill="#0b5cad"/>
+<text x="806" y="334" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="10" fill="#8895a4" font-weight="400" text-anchor="start">0</text>
+<text x="1330" y="334" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="10" fill="#8895a4" font-weight="400" text-anchor="end">5,000 training steps</text>
+<text x="1326.0" y="210.84615384615387" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="10.5" fill="#0b5cad" font-weight="650" text-anchor="end">0.06747</text>
+<text x="760" y="372" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">Same measurement on the mixed-instruction baseline: 0.01323 → paired data is 1.35× higher.</text>
+<rect x="740" y="396" width="660" height="264" rx="10" fill="#f8fafc" stroke="#cdd8e4" stroke-width="1.2"/>
+<text x="760" y="424" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#12181f" font-weight="650" text-anchor="start">What the pipeline measured</text>
+<text x="760" y="454" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="15" fill="#0f7a4d" font-weight="700" text-anchor="start">p = 0.0094</text>
+<text x="912" y="454" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">grasp 1/12 → 8/12 on real hardware</text>
+<text x="912" y="469" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#8895a4" font-weight="400" text-anchor="start">same steps, same session, same robot: only the training data differs</text>
+<line x1="760" y1="478" x2="1380" y2="478" stroke="#eef2f7" stroke-width="1"/>
+<text x="760" y="502" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="15" fill="#5b6b7c" font-weight="700" text-anchor="start">p = 0.0028</text>
+<text x="912" y="502" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">the two-stage route reaches 9/12</text>
+<text x="912" y="517" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#8895a4" font-weight="400" text-anchor="start">task success p = 0.155 — reported as not significant</text>
+<line x1="760" y1="526" x2="1380" y2="526" stroke="#eef2f7" stroke-width="1"/>
+<text x="760" y="550" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="15" fill="#0f7a4d" font-weight="700" text-anchor="start">40/40 · 15/38</text>
+<text x="912" y="550" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">followed the instruction whenever it landed</text>
+<text x="912" y="565" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#8895a4" font-weight="400" text-anchor="start">Wilson lower bound 0.912; but only 15 of 38 scene pairs were right both ways</text>
+<line x1="760" y1="574" x2="1380" y2="574" stroke="#eef2f7" stroke-width="1"/>
+<text x="760" y="598" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="15" fill="#a8480a" font-weight="700" text-anchor="start">52.6%</text>
+<text x="912" y="598" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#5b6b7c" font-weight="400" text-anchor="start">the same run under intention-to-treat</text>
+<text x="912" y="613" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#8895a4" font-weight="400" text-anchor="start">40 of 76 rollouts — the denominator that keeps 100% honest</text>
+<rect x="740" y="690" width="660" height="118" rx="10" fill="#e8f0fa" stroke="#c9dcf0" stroke-width="1.2"/>
+<text x="760" y="716" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#12181f" font-weight="650" text-anchor="start">Check it yourself — no GPU, no display, about 10 seconds</text>
+<text x="760" y="740" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="11.5" fill="#0b5cad" font-weight="400" text-anchor="start">make test        # 83 tests over this repository's own artifacts</text>
+<text x="760" y="760" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="11.5" fill="#0b5cad" font-weight="400" text-anchor="start">make kit-test    # 134 tests over the evaluation kit</text>
+<text x="760" y="780" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="11.5" fill="#0b5cad" font-weight="400" text-anchor="start">make tables      # regenerate docs/RESULTS.md from rl/eval/*.json</text>
+<text x="40" y="1008" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#8895a4" font-weight="400" text-anchor="start">github.com/yyl873/python-for-mujoco-SDG   ·   MIT   ·   simulation, data, evaluation and conclusions are mine; ACT/SmolVLA implementations come from lerobot.</text>
+</svg>

@@ -7,7 +7,50 @@
     但整段塞回模型上下文就是实打实的输入 Token。
     这里的工具把「执行」留在本地进程里，只把「结论字段」交出去。
 
-【文件清单】
+【目录分层】
+    tools/            入口层：流水线、审计、结果表、素材生成。命令都从这里调，路径稳定。
+    tools/probes/     一次性诊断层：排完某个具体问题就归档的探针/扫描/数据修复脚本。
+                      不是稳定 API，没有任何代码 import 它们，保留只为结果可复现。
+                      清单与"它回答过什么问题"见 tools/probes/README.md
+    判断标准：新脚本先问一句"这是一直要用的入口，还是一次性排障？"
+              一次性的直接放 probes/，别再摊在 tools/ 根下。
+
+【入口脚本清单（一句话）】
+
+  流水线与阅读
+    run_pipeline.py                ik -> grasp -> render 三段清单式执行器，只回三态回执
+    inspect_episode.py           ★ 按需出单条 episode 的排查产物（拼图/预览/体检）
+    digest.py                      文件/目录摘要（def/class 骨架 + 行号 + tail/grep）
+    callmap.py                     一次运行实际走到的仓库内函数成本表 → "该读哪几行"
+    replay_policy.py               把策略放回 MuJoCo 里开环重放 / 闭环回放
+
+  审计与仪器（被判据引用，属于稳定面）
+    probe_contact_audit.py       ★ 接触真实性六项闸门 G1~G6（0.5 s/条）
+    probe_grasp_robustness.py      换起点/配比/节奏后还抓得住吗（30 s）
+    probe_release_gripper.py       离线把仿真 release 帧喂给 ACT，看夹爪输出刻度
+    probe_release_gripper_real.py  真机 holdout 上找"第二次张开"（释放段），喂给 ACT
+    log_gripper_rollout.py         真机 rollout 记 req/sent/present + 6 个关节角 → CSV
+    compare_release_ab.py          两份 roll CSV 对比 A/B 的释放时机与位姿
+    compare_sim_real.py            sim156 ↔ real_train_fixed 域差（起点差 / 动作 W1）
+    test_gripper_loaded.py         带载夹爪能否到 80（定时窗口，不用 input()）
+
+  结果表与素材
+    make_tables.py                 从 rl/eval/*.json 生成 docs/RESULTS.md（--check 只校验）
+    make_assets.py                 演示 mp4 → README 能内嵌的 GIF（docs/assets/）
+    make_compare_video.py          左右两条演示拼成上下并置对比视频 + GIF
+
+  训练 / 评测 / 发布编排（shell）
+    export_sim156_chunked.sh       分块导出 sim156，已完成块自动跳过，最后 merge + 体检
+    train_A_to22500.sh             A（纯真机）17500 → 22500 步，与 B@22500 同步数对照
+    train_sim156_then_real.sh      两阶段：纯仿真预训练 → 真机微调
+    train_mix.py                   按"臂"训练 ACT（本地数据集、不联网、参数命令行可覆盖）
+    run_armB_resume_loop.sh        armB 续训守护：崩了自动从最新 ckpt 续，最多 20 次
+    run_eval_ab_cpu.sh             A/B holdout 离线评测（CPU 版，不依赖 GPU/桌面）
+    run_B_release_check.sh         B 释放诊断：恢复训练模式跑一次（关 temporal ensembling）
+    pre_push_check.sh              发布前自检：自检套件/密钥/大文件/README 链接/待推送
+    sync_kit.sh                    把 embodied-eval-kit 同步到独立仓库 yyl873/embodied-eval-kit
+
+【文件清单（详细用法）】
 
   run_pipeline.py      一条命令跑完 demo 的 ik -> grasp -> render
                        （video 段第八轮已退役：mp4 就是最终格式，不再 AVI 转码）

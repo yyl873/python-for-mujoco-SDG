@@ -19,7 +19,7 @@
     montage_flagged.png     只放判定为"与文件夹名不符"或"同数据集内不一致"的文件
 
 用法：
-    env -u PYTHONHOME -u PYTHONPATH /usr/bin/python3 tools/scan_real_cams.py \
+    env -u PYTHONHOME -u PYTHONPATH /usr/bin/python3 tools/probes/scan_real_cams.py \
         [--root ~/lerobot_datasets] [--frames 16] [--workers 8] [--out inspect/cam_scan]
 """
 from __future__ import annotations

@@ -21,10 +21,10 @@
     summary_env_framing.txt    按数据集聚合 + 逐帧时间线摘要
     montage_env_framing.png    每个数据集取首文件的 早/中/晚 三帧，画出垫子包围盒
 
-相机路数的判定沿用 tools/scan_real_cams.py 的 static% 主判据（本脚本只测环境相机那一路）。
+相机路数的判定沿用 tools/probes/scan_real_cams.py 的 static% 主判据（本脚本只测环境相机那一路）。
 
 用法：
-    env -u PYTHONHOME -u PYTHONPATH /usr/bin/python3 tools/scan_env_framing.py \
+    env -u PYTHONHOME -u PYTHONPATH /usr/bin/python3 tools/probes/scan_env_framing.py \
         [--root ~/lerobot_datasets] [--frames 24] [--workers 8] [--out inspect/env_framing]
 """
 from __future__ import annotations
@@ -124,7 +124,7 @@ def episode_jobs(ds_dir: Path, cam: str = CAM_ENV) -> list[dict]:
     try:
         import pyarrow.parquet as pq
     except ImportError:
-        raise SystemExit("按 episode 扫描需要 pyarrow：先跑 tools/get_pyarrow_libs.py，"
+        raise SystemExit("按 episode 扫描需要 pyarrow：先跑 tools/probes/get_pyarrow_libs.py，"
                          "再用 PYTHONPATH=$PWD/.cache/pylibs env -u PYTHONHOME /usr/bin/python3 ...")
     specs = []
     fps = 30.0

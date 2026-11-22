@@ -20,11 +20,11 @@ clean_archived_sessions.py -- 清理 ~/.dsh 里"已归档"的会话 + 悬空缓�
 
 用法
 ----
-  python3 tools/clean_archived_sessions.py --dry-run     # 只看会动什么，不动手
-  python3 tools/clean_archived_sessions.py               # 移到 ~/.dsh/_trash_<ts>/
-  python3 tools/clean_archived_sessions.py --purge       # 直接删除（不可恢复）
-  python3 tools/clean_archived_sessions.py --keep <id>   # 指定的归档会话例外保留
-  python3 tools/clean_archived_sessions.py --force       # 跳过"harness 在运行"检查
+  python3 tools/probes/clean_archived_sessions.py --dry-run     # 只看会动什么，不动手
+  python3 tools/probes/clean_archived_sessions.py               # 移到 ~/.dsh/_trash_<ts>/
+  python3 tools/probes/clean_archived_sessions.py --purge       # 直接删除（不可恢复）
+  python3 tools/probes/clean_archived_sessions.py --keep <id>   # 指定的归档会话例外保留
+  python3 tools/probes/clean_archived_sessions.py --force       # 跳过"harness 在运行"检查
 
 回滚
 ----
