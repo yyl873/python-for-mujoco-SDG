@@ -33,6 +33,8 @@ venv/
 # ===== 兜底：任何漏网的大产物 =====
 *.npz
 *.mp4
+# 例外：README 里内嵌的对比视频要入库（上面这条只是兜底拦漏网大文件）
+!docs/assets/*.mp4
 *.avi
 *.parquet
 *.pkl

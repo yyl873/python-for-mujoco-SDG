@@ -46,11 +46,17 @@ def test_no_tracked_file_over_5mb(repo_root):
 
 
 def test_readme_relative_links_point_to_existing_files(repo_root):
-    """README 里所有相对路径的 markdown 链接/图片都必须真实存在。"""
+    """README 里所有相对路径的 markdown 链接/图片都必须真实存在**且已入库**。
+
+    "本地存在但没 commit" 是真实踩过的坑：``.gitignore`` 里有一条 ``*.mp4`` 兜底规则，
+    生成 ``docs/assets/real_robot_ab.mp4`` 后 ``git status`` 里根本看不到它，
+    README 的链接在 GitHub 上就是死的——本地测试却全绿。所以这里同时查 git 索引。
+    """
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
     targets = re.findall(r"\]\(\s*<?([^)\s>]+)>?", readme)
 
-    checked, missing = 0, []
+    tracked = set(git_ls_files(repo_root))
+    checked, missing, untracked = 0, [], []
     for t in targets:
         if t.startswith(("http://", "https://", "mailto:", "#")):
             continue  # 外链 / 邮箱 / 页内锚点不查
@@ -60,8 +66,14 @@ def test_readme_relative_links_point_to_existing_files(repo_root):
         checked += 1
         if not (repo_root / path).exists():
             missing.append(t)
+        elif tracked and path not in tracked:
+            untracked.append(t)
     assert checked >= 5, f"README 里只解析到 {checked} 个相对链接，解析可能失效了"
     assert not missing, f"README 里有死链：{missing}"
+    assert not untracked, (
+        f"README 链接指向的文件没入库（本地能开、GitHub 上是死的）：{untracked}；"
+        "先 git add 再跑测试，或检查 .gitignore 是否把它们挡住了"
+    )
 
 
 def test_results_md_exists_with_three_tables(repo_root):
