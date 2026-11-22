@@ -10,6 +10,11 @@
 #   POLICY=vqbet     STEPS=5000 bash rl/run_bc_compare.sh
 #   POLICY=act       STEPS=5000 bash rl/run_bc_compare.sh   # 对照组（已有 005000，可跳过）
 #
+# 8GB 显存 / DP 的推荐跑法（先缩图，否则 batch8 OOM）：
+#   POLICY=diffusion STEPS=3000 EXTRA='--policy.resize_shape "[240,320]" --policy.crop_ratio 0.9' \
+#     bash rl/run_bc_compare.sh
+# 显存还是不够就把 BATCH=4（注意：改 batch 会削弱与 ACT@8 的可比性，要在结论里注明）
+#
 # 跑完评测：
 #   CKPT=$PWD/outputs/bc_diffusion/checkpoints/last/pretrained_model \
 #     DS=$PWD/rl/lang_ds/v2_pair OUT=rl/eval/lang_bc_diffusion.json bash rl/run_lang_eval.sh
@@ -27,6 +32,11 @@ DEVICE="${DEVICE:-cuda}"
 DS="${DS:-$PWD/rl/lang_ds/v2_pair}"
 OUT="${OUT:-$PWD/outputs/bc_${POLICY}}"
 BASE="${BASE:-}"          # 空=从头训（DP/VQ-BeT 的正常用法）；ACT 想续用微调基座就指过去
+# 额外透传参数（DP 在 8GB 显存上必须先缩图，否则显存爆）：
+#   EXTRA='--policy.resize_shape "[240,320]" --policy.crop_ratio 0.9'
+EXTRA="${EXTRA:-}"
+# 推理步数只影响评测速度，不影响训练（DP 默认 100 步很慢，评测前降到 10）
+NINF="${NINF:-}"
 PY="/home/yyl/miniforge3/envs/lerobot312/bin/lerobot-train"
 
 [ -e "$DS" ] || { echo "缺数据集: $DS" >&2; exit 2; }
@@ -62,7 +72,8 @@ env -u PYTHONHOME -u PYTHONPATH "$PY" \
   --policy.device="$DEVICE" \
   --batch_size="$BATCH" --steps="$STEPS" --save_freq="$SAVE_FREQ" \
   --num_workers="$WORKERS" --seed=1000 \
-  --output_dir="$OUT" 2>&1 | tee "$LOG"
+  ${NINF:+--policy.num_inference_steps="$NINF"} \
+  --output_dir="$OUT" $EXTRA 2>&1 | tee "$LOG"
 rc=${PIPESTATUS[0]}
 if grep -qiE "Switching to 'cpu'" "$LOG"; then
   echo "  ⚠️ 日志里出现 Switching to 'cpu' —— 这次实际跑在 CPU 上，别当 GPU 结果用"
