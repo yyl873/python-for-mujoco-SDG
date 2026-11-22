@@ -100,6 +100,10 @@ train:
 audit:
 	$(RUN) MUJOCO_GL=egl $(RL_PY) tools/probe_contact_audit.py
 
+## kit-sync    把 embodied-eval-kit 同步到独立仓库 yyl873/embodied-eval-kit
+kit-sync:
+	bash tools/sync_kit.sh
+
 ## publish     发布前自检：自检套件 / 密钥 / 大文件 / README 链接 / 待推送状态
 publish:
 	bash tools/pre_push_check.sh
@@ -110,4 +114,4 @@ clean:
 	rm -f rl/eval/demo_loop_r*.mp4
 	@echo "✓ 已清理（结果 json 与 ckpt 未动）"
 
-.PHONY: help tables check kit-demo weights assets demo demo-right demo-loop bc-compare eval train audit publish clean
+.PHONY: help tables check kit-demo weights assets demo demo-right demo-loop bc-compare eval train audit kit-sync publish clean

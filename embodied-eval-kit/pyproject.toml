@@ -7,12 +7,13 @@ name = "embodied-eval-kit"
 version = "0.1.0"
 description = "具身策略评测的最小工具包：区间估计、洁净判据、反事实配对聚合、三态回执"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "yyl" }]
 keywords = ["robotics", "evaluation", "imitation-learning", "language-conditioned", "statistics"]
 classifiers = [
-  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.12",
   "License :: OSI Approved :: MIT License",
   "Topic :: Scientific/Engineering",
 ]
